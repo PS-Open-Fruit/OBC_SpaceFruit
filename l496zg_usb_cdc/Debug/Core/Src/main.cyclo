@@ -1,0 +1,5 @@
+../Core/Src/main.c:66:6:clean_newline	4
+../Core/Src/main.c:80:5:main	5
+../Core/Src/main.c:152:6:SystemClock_Config	4
+../Core/Src/main.c:213:13:MX_GPIO_Init	1
+../Core/Src/main.c:281:6:Error_Handler	1
