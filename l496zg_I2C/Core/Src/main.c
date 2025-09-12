@@ -18,7 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "stm32l4xx_hal.h"
 #include <stdio.h>
+#include <stdint.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -32,8 +34,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define LM73_ADDR (0x4D << 1)
-#define LM73_REG_TEMP   0x00
-#define LM73_REG_CTRL   0x04
+#define MCP79411_ADDR (0x6F << 1)
+#define LM73_REG_CTRL 0x04
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -100,31 +102,31 @@ void I2C_Scan(void)
     }
 }
 
-void lm73Init(void)
-{
-    uint8_t data;
+// void lm73Init(void)
+// {
+//     uint8_t data;
 
-    // อ่านค่าเดิมจาก CTRL register
-    if (HAL_I2C_Mem_Read(&hi2c1, LM73_ADDR, LM73_REG_CTRL, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK) {
-        printf("LM73 init read failed!\r\n");
-        return;
-    }
+//     // อ่านค่าเดิมจาก CTRL register
+//     if (HAL_I2C_Mem_Read(&hi2c1, LM73_ADDR, LM73_REG_CTRL, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK) {
+//         printf("LM73 init read failed!\r\n");
+//         return;
+//     }
 
-    printf("CTRL before: 0x%02X\r\n", data);
+//     printf("CTRL before: 0x%02X\r\n", data);
 
-    // set bit[7:6] = 11
-    data |= (0b11 << 6);
+//     // set bit[7:6] = 11
+//     data |= (0b11 << 6);
 
-    if (HAL_I2C_Mem_Write(&hi2c1, LM73_ADDR, LM73_REG_CTRL, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK) {
-        printf("LM73 init write failed!\r\n");
-    }
+//     if (HAL_I2C_Mem_Write(&hi2c1, LM73_ADDR, LM73_REG_CTRL, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK) {
+//         printf("LM73 init write failed!\r\n");
+//     }
 
-    printf("CTRL after : 0x%02X\r\n", data);
-}
+//     printf("CTRL after : 0x%02X\r\n", data);
+// }
 
 uint8_t lm73GetStatus(void)
 {
-	uint8_t data;
+    uint8_t data;
     if (HAL_I2C_Mem_Read(&hi2c1, LM73_ADDR, LM73_REG_CTRL, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK) {
         printf("LM73 status read fail\r\n");
         return 0xFF;
@@ -159,6 +161,75 @@ float lm73GetTemperature()
     return tempHigh + tempLow;
 }
 
+/* Simple BCD -> binary conversion for MCP79411 time fields */
+static uint8_t bcd2bin(uint8_t b)
+{
+  return (uint8_t)(((b >> 4) * 10U) + (b & 0x0F));
+}
+
+float mcp79411GetTime(void)
+{
+  // MCP79411 time registers are BCD encoded. Register 0 has ST bit in bit7.
+  uint8_t timeBuff[7];
+  if (HAL_I2C_Mem_Read(&hi2c1, MCP79411_ADDR, 0x00, I2C_MEMADD_SIZE_8BIT, timeBuff, 7, HAL_MAX_DELAY) != HAL_OK)
+  {
+    printf("MCP79411 read fail\r\n");
+    return -1000.0f;
+  }
+
+  // If oscillator stop bit not set? Bit7 = ST (1 = running). If 0, start it.
+  if ((timeBuff[0] & 0x80) == 0)
+  {
+    uint8_t sec = timeBuff[0] | 0x80; // set ST bit
+    if (HAL_I2C_Mem_Write(&hi2c1, MCP79411_ADDR, 0x00, I2C_MEMADD_SIZE_8BIT, &sec, 1, HAL_MAX_DELAY) == HAL_OK)
+    {
+      printf("MCP79411 oscillator started\r\n");
+    }
+    else
+    {
+      printf("MCP79411 start fail\r\n");
+    }
+    return 0.0f; // not valid time yet
+  }
+
+  uint8_t sec_bcd  = (uint8_t)(timeBuff[0] & 0x7F);
+  uint8_t min_bcd  = (uint8_t)(timeBuff[1] & 0x7F);
+  uint8_t hour_bcd = (uint8_t)(timeBuff[2] & 0x3F); // 24h mode assumed (bit6 = 0)
+
+  uint8_t sec  = bcd2bin(sec_bcd);
+  uint8_t min  = bcd2bin(min_bcd);
+  uint8_t hour = bcd2bin(hour_bcd);
+
+  if (sec > 59 || min > 59 || hour > 23)
+  {
+    printf("MCP79411 invalid BCD time (%u:%u:%u)\r\n", hour, min, sec);
+    return -1000.0f;
+  }
+
+  return (float)hour + (float)min / 60.0f + (float)sec / 3600.0f;
+}
+
+// New: read Hours/Minutes/Seconds separately (returns HAL status-style int)
+int mcp79411GetHMS(uint8_t *h, uint8_t *m, uint8_t *s)
+{
+  uint8_t buf[7];
+  if (HAL_I2C_Mem_Read(&hi2c1, MCP79411_ADDR, 0x00, I2C_MEMADD_SIZE_8BIT, buf, 7, HAL_MAX_DELAY) != HAL_OK)
+    return -1; // I2C error
+  if ((buf[0] & 0x80) == 0)
+  {
+    // Start oscillator if stopped
+    uint8_t sec = buf[0] | 0x80;
+    HAL_I2C_Mem_Write(&hi2c1, MCP79411_ADDR, 0x00, I2C_MEMADD_SIZE_8BIT, &sec, 1, HAL_MAX_DELAY);
+    return -2; // oscillator was stopped
+  }
+  uint8_t sec  = bcd2bin((uint8_t)(buf[0] & 0x7F));
+  uint8_t min  = bcd2bin((uint8_t)(buf[1] & 0x7F));
+  uint8_t hour = bcd2bin((uint8_t)(buf[2] & 0x3F));
+  if (sec > 59 || min > 59 || hour > 23)
+    return -3; // invalid data
+  *s = sec; *m = min; *h = hour;
+  return 0;
+}
 
 /* USER CODE END 0 */
 
@@ -194,20 +265,30 @@ int main(void)
   MX_I2C1_Init();
   MX_LPUART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  lm73Init();
+
+  I2C_Scan();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	lm73Init();
-//	printf(lm73GetStatus());
-	printf("-----\r\n");
-	printf("Get Status read : 0x%02X\r\n",lm73GetStatus());
-	printf("Get Tempurature read : %.2f\r\n",lm73GetTemperature());
-	printf("-----end-----\r\n");
-	HAL_Delay(2000);
+    printf("-----LM73----\r\n");
+    printf("Get Status read : 0x%02X\r\n",lm73GetStatus());
+    printf("Get Temperature read : %.2f\r\n",lm73GetTemperature());
+    printf("-----end-----\r\n");
+    HAL_Delay(500);
+    printf("---MCP79411--\r\n");
+    uint8_t hh, mm, ss; int tstat = mcp79411GetHMS(&hh,&mm,&ss);
+    if (tstat == 0)
+      printf("Time: %02u:%02u:%02u\r\n", hh, mm, ss);
+    else if (tstat == -2)
+      printf("RTC oscillator started, time not valid yet\r\n");
+    else
+      printf("RTC read error (%d)\r\n", tstat);
+    printf("-----end-----\r\n");
+    HAL_Delay(1500);
 
     /* USER CODE END WHILE */
 
@@ -358,7 +439,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
-  /* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init 1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
