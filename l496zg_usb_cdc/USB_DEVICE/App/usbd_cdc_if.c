@@ -49,7 +49,7 @@
   */
 
 /* USER CODE BEGIN PRIVATE_TYPES */
-extern Buffer[64];
+extern Buffer[256];
 extern Flag;
 extern Buflen;
 /* USER CODE END PRIVATE_TYPES */
@@ -268,7 +268,7 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
   uint8_t len = (uint8_t) *Len;
   Flag = 1 ;
   Buflen = len;
-  memset(Buffer,'\0',64);
+  memset(Buffer,'\0',256);
   memcpy(Buffer,Buf,len);
   memset(Buf,'\0',len);
   return (USBD_OK);

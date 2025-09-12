@@ -47,7 +47,7 @@
 
 /* USER CODE BEGIN PV */
 uint8_t SendingText[] = "Hello world from STM32 by USB CDC Device\r\n";
-uint8_t Buffer[64];
+uint8_t Buffer[256];
 uint8_t Flag = 0;
 uint8_t Buflen = 0;
 
@@ -129,9 +129,13 @@ int main(void)
 	            	CDC_Transmit_FS((uint8_t *)text, strlen(text));
 
 	            }
+	            else if (strncmp((char*)Buffer, "try_more",Buflen-1)== 0){
+	            	char text[] = "In a quiet village nestled between misty hills,\r\n an old clockmaker crafted timepieces that whispered stories.\r\n Each tick echoed memories, each tock foretold dreams.\r\n His shop was a sanctuary where time gently danced.\r\n";
+	            	CDC_Transmit_FS(text, strlen((char*)text));
+	            }
 	            else {
 	                char text[128];
-	                snprintf(text, sizeof(text), "unknown command: %s\r\n", Buffer);
+	                snprintf(text, sizeof(text), "%s\r\n", Buffer);
 	                CDC_Transmit_FS((char*)text, strlen(text));
 	            }
 	            Buflen= 0;
@@ -288,8 +292,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

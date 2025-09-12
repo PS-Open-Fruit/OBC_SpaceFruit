@@ -64,8 +64,8 @@ all: main-build
 main-build: l496zg_usb_cdc.elf secondary-outputs
 
 # Tool invocations
-l496zg_usb_cdc.elf l496zg_usb_cdc.map: $(OBJS) $(USER_OBJS) D:\stm32\l496zg_usb_cdc\STM32L496ZGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "l496zg_usb_cdc.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\stm32\l496zg_usb_cdc\STM32L496ZGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="l496zg_usb_cdc.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+l496zg_usb_cdc.elf l496zg_usb_cdc.map: $(OBJS) $(USER_OBJS) D:\github\OBC_Peripheral_Testing\l496zg_usb_cdc\STM32L496ZGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "l496zg_usb_cdc.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\github\OBC_Peripheral_Testing\l496zg_usb_cdc\STM32L496ZGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="l496zg_usb_cdc.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
