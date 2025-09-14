@@ -47,9 +47,10 @@
 
 /* USER CODE BEGIN PV */
 uint8_t SendingText[] = "Hello world from STM32 by USB CDC Device\r\n";
-uint8_t Buffer[256];
-uint8_t Flag = 0;
-uint8_t Buflen = 0;
+uint8_t *Buffer = NULL;
+uint32_t Buflen = 0;
+volatile uint8_t Flag = 0;
+
 
 
 /* USER CODE END PV */
@@ -134,9 +135,7 @@ int main(void)
 	            	CDC_Transmit_FS(text, strlen((char*)text));
 	            }
 	            else {
-	                char text[128];
-	                snprintf(text, sizeof(text), "%s\r\n", Buffer);
-	                CDC_Transmit_FS((char*)text, strlen(text));
+	            	CDC_Transmit_FS(Buffer, Buflen);
 	            }
 	            Buflen= 0;
 	            Flag=0;

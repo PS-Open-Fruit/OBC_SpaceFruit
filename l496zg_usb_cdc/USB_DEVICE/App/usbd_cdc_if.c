@@ -49,9 +49,11 @@
   */
 
 /* USER CODE BEGIN PRIVATE_TYPES */
-extern Buffer[256];
-extern Flag;
-extern Buflen;
+extern uint8_t *Buffer;
+extern uint32_t Buflen;
+extern volatile uint8_t Flag;
+
+
 /* USER CODE END PRIVATE_TYPES */
 
 /**
@@ -266,11 +268,15 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   uint8_t len = (uint8_t) *Len;
+  free(Buffer);                           // คืนหน่วยความจำเก่า (ถ้ามี)
+  Buffer = (uint8_t*)malloc(len);         // จองหน่วยความจำใหม่
+  if (Buffer != NULL) {
+      memcpy(Buffer, Buf, len);           // copy ข้อมูล
+      Buflen = len;
+      Flag = 1;
+  }
+  memset(Buf, 0, len);                    // clear buffer ชั่วคราว
   Flag = 1 ;
-  Buflen = len;
-  memset(Buffer,'\0',256);
-  memcpy(Buffer,Buf,len);
-  memset(Buf,'\0',len);
   return (USBD_OK);
 
   /* USER CODE END 6 */
