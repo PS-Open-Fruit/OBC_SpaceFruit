@@ -50,11 +50,11 @@ uint8_t SendingText[] = "Hello world from STM32 by USB CDC Device\r\n";
 uint8_t *Buffer = NULL;
 uint32_t Buflen = 0;
 volatile uint8_t Flag = 0;
-char data32[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
-char data64[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
-char data128[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+char data32[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
+char data64[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
+char data128[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
 char data256[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
 
 
 /* USER CODE END PV */
@@ -136,27 +136,43 @@ int main(void)
 	            }
 	            else if (strncmp((char*)Buffer, "try_more",Buflen-1)== 0){
 	            	for(int i = 0 ; i < 5; i++){
-                  char text[];
-                  char timetext[];
-                  sprinf(text,"Iteration s %d\r\n",i);
-                  CDC_Transmit_FS(text, strlen(text));
-                  HAL_Delay(1000);
-                  startTick32 = HAL_GetTick();
+                  char text[64];
+                  char timetext[256];
+                  DWT->CTRL |= 1;
+                  sprintf(text, "Iteration %d\r\n", i);
+                  CDC_Transmit_FS((uint8_t*)text, strlen(text));
+                  HAL_Delay(5000);
+
+                  uint32_t startTick32 = DWT->CYCCNT;
                   CDC_Transmit_FS(data32, strlen(data32));
-                  endtrick32 = HAL_GetTick();
-                  startTick64 = HAL_GetTick();
+                  uint32_t endTick32 = DWT->CYCCNT;
+                  HAL_Delay(5000);
+
+                  uint32_t startTick64 = DWT->CYCCNT;
                   CDC_Transmit_FS(data64, strlen(data64));
-                  endtrick64 = HAL_GetTick();
-                  startTick128 = HAL_GetTick();
+                  uint32_t endTick64 = DWT->CYCCNT;
+                  HAL_Delay(5000);
+
+                  uint32_t startTick128 = DWT->CYCCNT;
                   CDC_Transmit_FS(data128, strlen(data128));
-                  endtrick128 = HAL_GetTick();
-                  startTick256 = HAL_GetTick();
+                  uint32_t endTick128 = DWT->CYCCNT;
+                  HAL_Delay(5000);
+
+                  uint32_t startTick256 = DWT->CYCCNT;
                   CDC_Transmit_FS(data256, strlen(data256));
-                  endtrick256 = HAL_GetTick();
-                  sprintf(timetext,"32 bytes time : %d ms\r\n64 bytes time : %d ms\r\n
-                    128 bytes time : %d ms\r\n256 bytes time : %d ms\r\n",endtrick32-startTick32,endtrick64-startTick64,
-                    endtrick128-startTick128,endtrick256-startTick256);
-                  CDC_Transmit_FS(timetext, strlen(timetext));
+                  uint32_t endTick256 = DWT->CYCCNT;
+                  HAL_Delay(5000);
+
+                  sprintf(timetext,
+                                  "32 bytes time: %lu us\r\n"
+                                  "64 bytes time: %lu us\r\n"
+                                  "128 bytes time: %lu us\r\n"
+                                  "256 bytes time: %lu us\r\n",
+                                  (endTick32 - startTick32) / (HAL_RCC_GetHCLKFreq()/1000000),
+                                  (endTick64 - startTick64) / (HAL_RCC_GetHCLKFreq()/1000000),
+                                  (endTick128 - startTick128) / (HAL_RCC_GetHCLKFreq()/1000000),
+                                  (endTick256 - startTick256) / (HAL_RCC_GetHCLKFreq()/1000000));
+                  CDC_Transmit_FS((uint8_t*)timetext, strlen(timetext));
                   HAL_Delay(5000);
                 }
 	            }
