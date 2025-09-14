@@ -50,7 +50,11 @@ uint8_t SendingText[] = "Hello world from STM32 by USB CDC Device\r\n";
 uint8_t *Buffer = NULL;
 uint32_t Buflen = 0;
 volatile uint8_t Flag = 0;
-
+char data32[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+char data64[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+char data128[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+char data256[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
 
 
 /* USER CODE END PV */
@@ -131,8 +135,30 @@ int main(void)
 
 	            }
 	            else if (strncmp((char*)Buffer, "try_more",Buflen-1)== 0){
-	            	char text[] = "In a quiet village nestled between misty hills,\r\n an old clockmaker crafted timepieces that whispered stories.\r\n Each tick echoed memories, each tock foretold dreams.\r\n His shop was a sanctuary where time gently danced.\r\n";
-	            	CDC_Transmit_FS(text, strlen((char*)text));
+	            	for(int i = 0 ; i < 5; i++){
+                  char text[];
+                  char timetext[];
+                  sprinf(text,"Iteration s %d\r\n",i);
+                  CDC_Transmit_FS(text, strlen(text));
+                  HAL_Delay(1000);
+                  startTick32 = HAL_GetTick();
+                  CDC_Transmit_FS(data32, strlen(data32));
+                  endtrick32 = HAL_GetTick();
+                  startTick64 = HAL_GetTick();
+                  CDC_Transmit_FS(data64, strlen(data64));
+                  endtrick64 = HAL_GetTick();
+                  startTick128 = HAL_GetTick();
+                  CDC_Transmit_FS(data128, strlen(data128));
+                  endtrick128 = HAL_GetTick();
+                  startTick256 = HAL_GetTick();
+                  CDC_Transmit_FS(data256, strlen(data256));
+                  endtrick256 = HAL_GetTick();
+                  sprintf(timetext,"32 bytes time : %d ms\r\n64 bytes time : %d ms\r\n
+                    128 bytes time : %d ms\r\n256 bytes time : %d ms\r\n",endtrick32-startTick32,endtrick64-startTick64,
+                    endtrick128-startTick128,endtrick256-startTick256);
+                  CDC_Transmit_FS(timetext, strlen(timetext));
+                  HAL_Delay(5000);
+                }
 	            }
 	            else {
 	            	CDC_Transmit_FS(Buffer, Buflen);
