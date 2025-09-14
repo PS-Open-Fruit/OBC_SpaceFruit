@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2025 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -50,12 +50,11 @@ uint8_t SendingText[] = "Hello world from STM32 by USB CDC Device\r\n";
 uint8_t *Buffer = NULL;
 uint32_t Buflen = 0;
 volatile uint8_t Flag = 0;
-char data32[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
-char data64[] ="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
-char data128[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
-char data256[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
-"ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
-
+char data32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
+char data64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
+char data128[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
+char data256[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ123456ABCDEFGHIJKLMNOPQRSTUVWXYZ1234\r\n";
 
 /* USER CODE END PV */
 
@@ -68,13 +67,16 @@ static void MX_GPIO_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void clean_newline(uint8_t* buf,uint16_t maxlen){
-	for (int i = 0; i < maxlen; i++){
-		if(buf[i] == '\r' || buf[i] == '\n'){
-			buf[i] == '\0';
-			break;
-		}
-	}
+void clean_newline(uint8_t *buf, uint16_t maxlen)
+{
+  for (int i = 0; i < maxlen; i++)
+  {
+    if (buf[i] == '\r' || buf[i] == '\n')
+    {
+      buf[i] == '\0';
+      break;
+    }
+  }
 }
 /* USER CODE END 0 */
 
@@ -116,73 +118,77 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if(Flag == 1){
-	            if (strncmp((char*)Buffer, "on",Buflen-1) == 0 ){
-	                char text[] = "led is on\r\n";
-	                CDC_Transmit_FS(text, strlen((char*)text));
-	            }
-	            else if (strncmp((char*)Buffer, "off",Buflen-1)== 0){
-	                char text[] = "led is off\r\n";
-	                CDC_Transmit_FS(text, strlen((char*)text));
-	            }
-	            else if (strncmp((char*)Buffer, "show",Buflen-1)== 0){
-	            	char *text = "toggle show 25 times\r\n";
-	            	CDC_Transmit_FS((uint8_t *)text, strlen(text));
-	            	HAL_Delay(5000);
+    if (Flag == 1)
+    {
+      // if (strncmp((char*)Buffer, "on",Buflen-1) == 0 ){
+      //     char text[] = "led is on\r\n";
+      //     CDC_Transmit_FS(text, strlen((char*)text));
+      // }
+      // else if (strncmp((char*)Buffer, "off",Buflen-1)== 0){
+      //     char text[] = "led is off\r\n";
+      //     CDC_Transmit_FS(text, strlen((char*)text));
+      // }
+      // else if (strncmp((char*)Buffer, "show",Buflen-1)== 0){
+      // 	char *text = "toggle show 25 times\r\n";
+      // 	CDC_Transmit_FS((uint8_t *)text, strlen(text));
+      // 	HAL_Delay(5000);
 
-	            	text = "toggle finish\r\n";   // reassign ได้
-	            	CDC_Transmit_FS((uint8_t *)text, strlen(text));
+      // 	text = "toggle finish\r\n";   // reassign ได้
+      // 	CDC_Transmit_FS((uint8_t *)text, strlen(text));
 
-	            }
-	            else if (strncmp((char*)Buffer, "try_more",Buflen-1)== 0){
-	            	for(int i = 0 ; i < 5; i++){
-                  char text[64];
-                  char timetext[256];
-                  DWT->CTRL |= 1;
-                  sprintf(text, "Iteration %d\r\n", i);
-                  CDC_Transmit_FS((uint8_t*)text, strlen(text));
-                  HAL_Delay(5000);
+      // }
+      if (strncmp((char *)Buffer, "try_more", 8) == 0)
+      {
+        for (int i = 0; i < 5; i++)
+        {
+          char text[64];
+          char timetext[256];
+          DWT->CTRL |= 1;
+          sprintf(text, "Iteration %d\r\n", i);
+          CDC_Transmit_FS((uint8_t *)text, strlen(text));
+          HAL_Delay(5000);
 
-                  uint32_t startTick32 = DWT->CYCCNT;
-                  CDC_Transmit_FS(data32, strlen(data32));
-                  uint32_t endTick32 = DWT->CYCCNT;
-                  HAL_Delay(5000);
+          uint32_t startTick32 = DWT->CYCCNT;
+          CDC_Transmit_FS(data32, strlen(data32));
+          uint32_t endTick32 = DWT->CYCCNT;
+          HAL_Delay(5000);
 
-                  uint32_t startTick64 = DWT->CYCCNT;
-                  CDC_Transmit_FS(data64, strlen(data64));
-                  uint32_t endTick64 = DWT->CYCCNT;
-                  HAL_Delay(5000);
+          uint32_t startTick64 = DWT->CYCCNT;
+          CDC_Transmit_FS(data64, strlen(data64));
+          uint32_t endTick64 = DWT->CYCCNT;
+          HAL_Delay(5000);
 
-                  uint32_t startTick128 = DWT->CYCCNT;
-                  CDC_Transmit_FS(data128, strlen(data128));
-                  uint32_t endTick128 = DWT->CYCCNT;
-                  HAL_Delay(5000);
+          uint32_t startTick128 = DWT->CYCCNT;
+          CDC_Transmit_FS(data128, strlen(data128));
+          uint32_t endTick128 = DWT->CYCCNT;
+          HAL_Delay(5000);
 
-                  uint32_t startTick256 = DWT->CYCCNT;
-                  CDC_Transmit_FS(data256, strlen(data256));
-                  uint32_t endTick256 = DWT->CYCCNT;
-                  HAL_Delay(5000);
+          uint32_t startTick256 = DWT->CYCCNT;
+          CDC_Transmit_FS(data256, strlen(data256));
+          uint32_t endTick256 = DWT->CYCCNT;
+          HAL_Delay(5000);
 
-                  sprintf(timetext,
-                                  "32 bytes time: %lu us\r\n"
-                                  "64 bytes time: %lu us\r\n"
-                                  "128 bytes time: %lu us\r\n"
-                                  "256 bytes time: %lu us\r\n",
-                                  (endTick32 - startTick32) / (HAL_RCC_GetHCLKFreq()/1000000),
-                                  (endTick64 - startTick64) / (HAL_RCC_GetHCLKFreq()/1000000),
-                                  (endTick128 - startTick128) / (HAL_RCC_GetHCLKFreq()/1000000),
-                                  (endTick256 - startTick256) / (HAL_RCC_GetHCLKFreq()/1000000));
-                  CDC_Transmit_FS((uint8_t*)timetext, strlen(timetext));
-                  HAL_Delay(5000);
-                }
-	            }
-	            else {
-	            	CDC_Transmit_FS(Buffer, Buflen);
-	            }
-	            Buflen= 0;
-	            Flag=0;
-	            HAL_Delay(1000);
-	        }
+          sprintf(timetext,
+                  "32 bytes time: %lu us\r\n"
+                  "64 bytes time: %lu us\r\n"
+                  "128 bytes time: %lu us\r\n"
+                  "256 bytes time: %lu us\r\n",
+                  (endTick32 - startTick32) / (HAL_RCC_GetHCLKFreq() / 1000000),
+                  (endTick64 - startTick64) / (HAL_RCC_GetHCLKFreq() / 1000000),
+                  (endTick128 - startTick128) / (HAL_RCC_GetHCLKFreq() / 1000000),
+                  (endTick256 - startTick256) / (HAL_RCC_GetHCLKFreq() / 1000000));
+          CDC_Transmit_FS((uint8_t *)timetext, strlen(timetext));
+          HAL_Delay(5000);
+        }
+      }
+      else
+      {
+        CDC_Transmit_FS(Buffer, Buflen);
+      }
+      Buflen = 0;
+      Flag = 0;
+      HAL_Delay(1000);
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
