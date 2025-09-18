@@ -120,65 +120,27 @@ int main(void)
   {
     if (Flag == 1)
     {
-      // if (strncmp((char*)Buffer, "on",Buflen-1) == 0 ){
-      //     char text[] = "led is on\r\n";
-      //     CDC_Transmit_FS(text, strlen((char*)text));
-      // }
-      // else if (strncmp((char*)Buffer, "off",Buflen-1)== 0){
-      //     char text[] = "led is off\r\n";
-      //     CDC_Transmit_FS(text, strlen((char*)text));
-      // }
-      // else if (strncmp((char*)Buffer, "show",Buflen-1)== 0){
-      // 	char *text = "toggle show 25 times\r\n";
-      // 	CDC_Transmit_FS((uint8_t *)text, strlen(text));
-      // 	HAL_Delay(5000);
-
-      // 	text = "toggle finish\r\n";   // reassign ได้
-      // 	CDC_Transmit_FS((uint8_t *)text, strlen(text));
-
-      // }
       if (strncmp((char *)Buffer, "try_more", 8) == 0)
       {
         for (int i = 0; i < 5; i++)
         {
           char text[64];
-          char timetext[256];
-          DWT->CTRL |= 1;
           sprintf(text, "Iteration %d\r\n", i);
           CDC_Transmit_FS((uint8_t *)text, strlen(text));
           HAL_Delay(5000);
 
-          uint32_t startTick32 = DWT->CYCCNT;
           CDC_Transmit_FS(data32, strlen(data32));
-          uint32_t endTick32 = DWT->CYCCNT;
           HAL_Delay(5000);
 
-          uint32_t startTick64 = DWT->CYCCNT;
           CDC_Transmit_FS(data64, strlen(data64));
-          uint32_t endTick64 = DWT->CYCCNT;
           HAL_Delay(5000);
 
-          uint32_t startTick128 = DWT->CYCCNT;
           CDC_Transmit_FS(data128, strlen(data128));
-          uint32_t endTick128 = DWT->CYCCNT;
           HAL_Delay(5000);
 
-          uint32_t startTick256 = DWT->CYCCNT;
           CDC_Transmit_FS(data256, strlen(data256));
-          uint32_t endTick256 = DWT->CYCCNT;
           HAL_Delay(5000);
 
-          sprintf(timetext,
-                  "32 bytes time: %lu us\r\n"
-                  "64 bytes time: %lu us\r\n"
-                  "128 bytes time: %lu us\r\n"
-                  "256 bytes time: %lu us\r\n",
-                  (endTick32 - startTick32) / (HAL_RCC_GetHCLKFreq() / 1000000),
-                  (endTick64 - startTick64) / (HAL_RCC_GetHCLKFreq() / 1000000),
-                  (endTick128 - startTick128) / (HAL_RCC_GetHCLKFreq() / 1000000),
-                  (endTick256 - startTick256) / (HAL_RCC_GetHCLKFreq() / 1000000));
-          CDC_Transmit_FS((uint8_t *)timetext, strlen(timetext));
-          HAL_Delay(5000);
         }
       }
       else
