@@ -37,7 +37,7 @@ ser = serial.Serial(PORT, baudrate=BAUDRATE, timeout=TIMEOUT)
 for size in TEST_SIZES:
     for trial in range(NUM_TRIALS):
         msg = random_message(size)
-        data = (msg + "\n").encode()
+        data = (msg).encode()
 
         ser.reset_input_buffer()
         start_time = time.time()
