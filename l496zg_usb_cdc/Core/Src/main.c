@@ -123,7 +123,6 @@ int main(void)
   {
 	  HAL_UART_Transmit(&huart1,"A",1,HAL_MAX_DELAY);
       HAL_Delay(1000);
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
