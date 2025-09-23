@@ -121,7 +121,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_UART_Transmit(&huart1,"A",1,HAL_MAX_DELAY);
+	  CDC_Transmit_FS("A",1);
       HAL_Delay(1000);
     /* USER CODE END WHILE */
 
