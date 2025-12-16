@@ -1,9 +1,15 @@
 import time
 import can_bus
+import platform
 
-# Adapter configuration
-CHANNEL = 'COM6'      # WeAct USB2CANFD V1 on Windows
-BUSTYPE = 'slcan'
+# Platform-aware: use slcan on Windows (USB adapter), socketcan on Linux (native)
+SYSTEM = platform.system()
+if SYSTEM == 'Windows':
+    CHANNEL = 'COM6'      # WeAct USB2CANFD V1 on Windows
+    BUSTYPE = 'slcan'
+else:
+    CHANNEL = 'can0'      # Native CAN on Linux (RS485 HAT)
+    BUSTYPE = 'socketcan'
 BITRATE = 250000
 
 # Heartbeat gating: if enabled, only send when a heartbeat is seen recently.
