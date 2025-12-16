@@ -14,7 +14,7 @@ BITRATE = 250000
 
 # Heartbeat gating: if enabled, only send when a heartbeat is seen recently.
 # If you are just running `candump` on the Pi (no heartbeat), set USE_HEARTBEAT=False.
-USE_HEARTBEAT = False
+USE_HEARTBEAT = True
 HEARTBEAT_ID = 0x700
 HEARTBEAT_TIMEOUT_S = 1.0
 

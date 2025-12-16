@@ -12,6 +12,10 @@ else:
     BUSTYPE = 'socketcan'
 BITRATE = 250000
 
+# Send a heartbeat periodically so the sender knows we're alive
+HEARTBEAT_ID = 0x700
+HEARTBEAT_PERIOD_S = 0.1
+
 
 def _print_msg(msg):
 	ts = msg.get('timestamp', time.time())
@@ -23,9 +27,18 @@ def main():
 		return
 	can_bus.on_receive(_print_msg)
 	can_bus.start()
-	print("Receiving for 10 seconds...")
+	print("Receiving and sending heartbeat...")
+	
+	next_hb = time.monotonic()
 	try:
-		time.sleep(10)
+		while True:
+			now = time.monotonic()
+			if now >= next_hb:
+				next_hb += HEARTBEAT_PERIOD_S
+				can_bus.send(HEARTBEAT_ID, [0x01], timeout=0.1)
+			time.sleep(0.01)
+	except KeyboardInterrupt:
+		pass
 	finally:
 		can_bus.stop()
 		can_bus.close()
