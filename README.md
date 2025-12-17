@@ -245,6 +245,16 @@ Receive CAN message.
 - `timeout`: Timeout in seconds (None for blocking)
 - Returns: `(can_id, data)` tuple or `None` if timeout
 
+### `receive_all(timeout=0.01, max_messages=100)`
+
+Receive all buffered messages at once (fast bulk receive for high throughput).
+
+- `timeout`: Timeout for first message (default: 0.01s)
+- `max_messages`: Maximum messages to receive in one call
+- Returns: List of `(can_id, data)` tuples (empty list if none available)
+
+**Use this for high-speed reception on PC to overcome SLCAN latency!**
+
 ### `send_string(can_id, text, extended=False)`
 
 Send string as multi-frame message.
@@ -369,9 +379,43 @@ finally:
 
 ```python
 from canbus import CANBus
+import time
 
 # Connect to USB CAN adapter
-can = CANBus('COM6', bitrate=100000)
+can = CANBus('COM6', bitrate=250000)
+
+try:
+    msg_count = 0
+    start_time = time.time()
+    
+    while True:
+        # Fast receive - get all buffered messages at once
+        messages = can.receive_all(timeout=0.1, max_messages=100)
+        
+        if messages:
+            for can_id, data in messages:
+                msg_count += 1
+                print(f"[RX] ID=0x{can_id:X}, Data={[hex(b) for b in data]}")
+            
+            # Show throughput stats
+            elapsed = time.time() - start_time
+            if elapsed >= 1.0:
+                print(f"[STATS] {msg_count} msgs in {elapsed:.2f}s = {msg_count/elapsed:.1f} msg/s")
+                msg_count = 0
+                start_time = time.time()
+        else:
+            time.sleep(0.1)
+finally:
+    can.close()
+```
+
+### PC Example (Simple Single Message)
+
+```python
+from canbus import CANBus
+
+# Connect to USB CAN adapter
+can = CANBus('COM6', bitrate=250000)
 
 try:
     # Send command to Pi
@@ -410,6 +454,7 @@ Just run your Python script with the COM port configured.
 - Automatic retry on send failure (default: 3 attempts)
 - String messages automatically split/reassemble across multiple frames
 - First byte of multi-frame messages is sequence number
+- **PC SLCAN Performance**: USB CAN adapters (SLCAN) have higher latency than SocketCAN. Use `receive_all()` for better throughput.
 
 ## Troubleshooting
 
@@ -421,6 +466,12 @@ Just run your Python script with the COM port configured.
 - Verify COM port in Device Manager
 - Check USB CAN adapter drivers installed
 - Use correct COM port number
+
+**PC: Slow message reception**
+- Use `receive_all()` instead of `receive()` for high-throughput scenarios
+- SLCAN (USB CAN) has inherent latency due to serial communication overhead
+- Each `receive()` call has ~10-50ms overhead; `receive_all()` gets all buffered messages at once
+- For real-time performance, consider native CAN hardware interface instead of USB adapter
 
 **No messages received**
 - Check both devices use same bitrate

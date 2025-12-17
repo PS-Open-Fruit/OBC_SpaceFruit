@@ -56,11 +56,12 @@ class CANBus:
                     bustype='socketcan'
                 )
             else:
-                # PC with USB CAN adapter
+                # PC with USB CAN adapter - optimized for lower latency
                 self.bus = can.interface.Bus(
                     channel=self.interface,
                     bustype='slcan',
-                    bitrate=self.bitrate
+                    bitrate=self.bitrate,
+                    rtscts=False  # Disable flow control for lower latency
                 )
             print(f"[CAN] Connected to {self.interface}")
         except Exception as e:
@@ -168,6 +169,39 @@ class CANBus:
         except Exception as e:
             print(f"[CAN] Receive error: {e}")
             return None
+    
+    def receive_all(self, timeout: float = 0.01, max_messages: int = 100) -> List[Tuple[int, List[int]]]:
+        """
+        Receive all available CAN messages (fast bulk receive)
+        Useful for high-throughput scenarios
+        
+        Args:
+            timeout: Timeout for first message (default: 0.01s)
+            max_messages: Maximum messages to receive in one call
+            
+        Returns:
+            List of (can_id, data) tuples (empty list if none available)
+        """
+        messages = []
+        
+        try:
+            # Get first message with timeout
+            msg = self.bus.recv(timeout=timeout)
+            if msg is None:
+                return messages
+            
+            messages.append((msg.arbitration_id, list(msg.data)))
+            
+            # Get all buffered messages with zero timeout
+            for _ in range(max_messages - 1):
+                msg = self.bus.recv(timeout=0)
+                if msg is None:
+                    break
+                messages.append((msg.arbitration_id, list(msg.data)))
+        except Exception as e:
+            print(f"[CAN] Receive error: {e}")
+        
+        return messages
     
     def send_string(self, can_id: int, text: str, extended: bool = False) -> bool:
         """
