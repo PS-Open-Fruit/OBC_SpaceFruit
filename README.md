@@ -10,6 +10,130 @@ Simple and reliable CAN communication library for Raspberry Pi Zero 2W and PC.
 - ✅ Multi-frame support for large messages
 - ✅ Simple API
 
+## Architecture
+
+### System Block Diagram
+
+```mermaid
+graph LR
+    subgraph "OBC (STM32)"
+        A[STM32 MCU]
+    end
+    
+    subgraph "VR Subsystem (Pi Zero 2W)"
+        B[Raspberry Pi Zero 2W]
+        C[RS485/CAN HAT]
+    end
+    
+    subgraph "PC (Development/Testing)"
+        D[PC]
+        E[USB CAN Adapter<br/>WeAct USB2CANFDV1]
+    end
+    
+    A <-->|CAN Bus<br/>CAN_H/CAN_L| C
+    B <-->|SPI/GPIO| C
+    D <-->|USB| E
+    E <-->|CAN Bus<br/>CAN_H/CAN_L| C
+    
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style B fill:#9cf,stroke:#333,stroke-width:2px
+    style C fill:#fc9,stroke:#333,stroke-width:2px
+    style D fill:#cfc,stroke:#333,stroke-width:2px
+    style E fill:#fcc,stroke:#333,stroke-width:2px
+```
+
+### Communication Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant OBC as OBC (STM32)<br/>or PC
+    participant CAN as CAN Bus<br/>250kbps
+    participant VR as VR Subsystem<br/>(Pi Zero 2W)
+    
+    Note over OBC,VR: Initialization
+    VR->>VR: CANBus('can0', 250000)
+    VR->>CAN: Setup interface (ip link set can0 up)
+    OBC->>OBC: CANBus('COM6', 250000)
+    OBC->>CAN: Connect via SLCAN
+    
+    Note over OBC,VR: Telemetry Loop
+    loop Every 1 second
+        VR->>CAN: send(0x100, telemetry_data)
+        CAN->>OBC: Receive telemetry
+        OBC->>OBC: Process data
+    end
+    
+    Note over OBC,VR: Command & Response
+    OBC->>CAN: send(0x200, command)
+    CAN->>VR: Receive command
+    VR->>VR: Process command
+    VR->>CAN: send(0x101, acknowledgment)
+    CAN->>OBC: Receive ACK
+    
+    Note over OBC,VR: Retry on Failure
+    OBC->>CAN: send(0x200, data) - Attempt 1
+    CAN--xVR: Lost/Error
+    OBC->>CAN: send(0x200, data) - Attempt 2 (retry)
+    CAN->>VR: Received successfully
+    VR->>CAN: send(0x101, ACK)
+    CAN->>OBC: ACK received
+    
+    Note over OBC,VR: Multi-frame String Transfer
+    VR->>CAN: Frame 0: [0x00, 'H', 'e', 'l', 'l', 'o', ' ', 'f']
+    VR->>CAN: Frame 1: [0x01, 'r', 'o', 'm', ' ', 'V', 'R', '!']
+    CAN->>OBC: Receive frames
+    OBC->>OBC: Reassemble: "Hello from VR!"
+    
+    Note over OBC,VR: Shutdown
+    VR->>VR: close()
+    VR->>CAN: Interface down
+    OBC->>OBC: close()
+```
+
+### Library Component Diagram
+
+```mermaid
+graph TD
+    subgraph "CANBus Class"
+        A[__init__<br/>Initialize interface]
+        B[_setup_socketcan<br/>Configure can0 on Pi]
+        C[_connect<br/>Create bus connection]
+        D[send<br/>Send with retry]
+        E[receive<br/>Receive message]
+        F[send_string<br/>Multi-frame send]
+        G[receive_string<br/>Multi-frame receive]
+        H[close<br/>Shutdown]
+    end
+    
+    subgraph "Backend (python-can)"
+        I[SocketCAN<br/>Linux can0]
+        J[SLCAN<br/>USB/Serial]
+    end
+    
+    subgraph "Hardware Layer"
+        K[RS485/CAN HAT<br/>on Pi]
+        L[USB CAN Adapter<br/>on PC]
+    end
+    
+    A --> B
+    A --> C
+    C --> I
+    C --> J
+    D --> C
+    E --> C
+    F --> D
+    G --> E
+    
+    I --> K
+    J --> L
+    
+    style A fill:#9cf,stroke:#333,stroke-width:2px
+    style D fill:#fc9,stroke:#333,stroke-width:2px
+    style E fill:#fc9,stroke:#333,stroke-width:2px
+    style I fill:#f9f,stroke:#333,stroke-width:2px
+    style J fill:#f9f,stroke:#333,stroke-width:2px
+```
+
 ## Installation
 
 ```bash
