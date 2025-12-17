@@ -132,19 +132,22 @@ class CANBus:
                 if attempt == max_retries - 1:
                     self._consecutive_failures += 1
                     
-                    # Detect persistent link issues
+                    # Detect persistent link issues (mark as down for buffer management)
                     if self._consecutive_failures >= 5:
                         if not self._link_down:
                             print(f"[CAN] Link down detected, queuing enabled (queued: {len(self._message_queue)})")
                             self._link_down = True
                             self.flush_buffers()
-                            # Queue this message since we just detected link down
-                            if queue_on_fail:
-                                self._message_queue.append((can_id, data.copy(), extended))
-                                self._queued_count += 1
-                                return True
                     elif self._consecutive_failures % 10 == 0:
                         print(f"[CAN] Warning: {self._consecutive_failures} consecutive send failures")
+                    
+                    # ALWAYS queue failed message to ensure zero data loss
+                    if queue_on_fail:
+                        self._message_queue.append((can_id, data.copy(), extended))
+                        self._queued_count += 1
+                        if len(self._message_queue) == 1 or self._queued_count % 10 == 0:
+                            print(f"[CAN] Messages queued: {len(self._message_queue)}")
+                        return True  # Queued = success (no data loss)
                     
                     return False
                 time.sleep(0.01)  # Brief delay before retry
