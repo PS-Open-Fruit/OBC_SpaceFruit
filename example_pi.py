@@ -8,15 +8,15 @@ from canbus import CANBus
 import time
 
 def main():
-    # Initialize CAN bus on Pi
+    # Initialize CAN bus on Pi with message queuing
     print("Starting VR Subsystem CAN interface...")
-    can = CANBus('can0', bitrate=250000)
+    can = CANBus('can0', bitrate=250000, queue_size=100)
     
     try:
         counter = 0
         
         while True:
-            # Send telemetry data to OBC
+            # Send telemetry data to OBC (automatically queued if link down)
             telemetry = [
                 0x01,  # VR subsystem ID
                 counter & 0xFF,  # Counter low byte
@@ -24,10 +24,17 @@ def main():
                 0xAA,  # Status byte (example)
             ]
             
+            # Send returns True even if queued
             if can.send(0x100, telemetry):
-                print(f"[TX] Telemetry sent: {telemetry}")
+                if can.is_link_up():
+                    print(f"[TX] Telemetry sent: {telemetry}")
+                else:
+                    stats = can.get_queue_stats()
+                    print(f"[QUEUE] Message queued ({stats['queue_length']} in queue)")
+            else:
+                print(f"[TX] Failed to send/queue telemetry")
             
-            # Listen for commands from OBC
+            # Listen for commands from OBC (non-blocking)
             result = can.receive(timeout=0.1)
             if result:
                 cmd_id, data = result

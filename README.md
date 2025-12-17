@@ -218,23 +218,25 @@ with CANBus('can0') as can:
 
 ## API Reference
 
-### `CANBus(interface, bitrate=100000, auto_setup=True)`
+### `CANBus(interface, bitrate=100000, auto_setup=True, queue_size=100)`
 
 Create CAN bus instance.
 
 - `interface`: 'can0' for Pi, 'COM6' (or other) for PC
 - `bitrate`: CAN bitrate in bps (default: 100000)
 - `auto_setup`: Auto-configure interface on Pi (default: True)
+- `queue_size`: Max messages to queue when link down (default: 100, 0=unlimited)
 
-### `send(can_id, data, extended=False, max_retries=3)`
+### `send(can_id, data, extended=False, max_retries=3, queue_on_fail=True)`
 
-Send CAN message with retry.
+Send CAN message with retry and automatic queuing on link failure.
 
 - `can_id`: CAN ID (0x000-0x7FF standard, up to 0x1FFFFFFF extended)
 - `data`: List of 0-8 bytes
 - `extended`: Use extended ID format
 - `max_retries`: Retry attempts
-- Returns: `True` if successful
+- `queue_on_fail`: Queue message if link is down (default: True)
+- Returns: `True` if successful or queued
 
 ### `receive(timeout=1.0)`
 
@@ -262,6 +264,79 @@ Receive multi-frame string message.
 ### `close()`
 
 Close CAN connection and shutdown interface.
+
+### `flush_buffers()`
+
+Flush TX/RX buffers to prevent blocking. Automatically called when link appears down.
+
+### `reset_link()`
+
+Manually reset link state tracking. Call after fixing connection issues.
+
+### `is_link_up()`
+
+Check if CAN link appears to be operational.
+
+- Returns: `True` if link is up, `False` if multiple consecutive failures detected
+
+### `get_queue_stats()`
+
+Get message queue statistics.
+
+- Returns: Dictionary with `queue_length`, `total_queued`, `total_dropped`, `queue_max`
+
+### `clear_queue()`
+
+Clear all queued messages (use with caution!).
+
+- Returns: Number of messages cleared
+
+## Link Management & Message Queuing
+
+The library automatically manages link failures and prevents data loss:
+
+### Automatic Message Queuing
+- **Queue on link down**: Messages are automatically queued when link fails (default: up to 100 messages)
+- **Auto-retry on recovery**: Queued messages automatically sent when link recovers
+- **No data loss**: Messages preserved during temporary link failures
+- **Configurable queue size**: Adjust with `queue_size` parameter (0 = unlimited)
+
+### Link Monitoring
+- **Automatic buffer flushing**: When 5+ consecutive send failures occur, buffers are automatically flushed
+- **Link state tracking**: `is_link_up()` returns `False` when link is down
+- **Auto-recovery**: Link state resets automatically when successful transmission resumes
+- **Non-blocking sends**: Short timeouts (0.1s) prevent receive blocking when buffer is full
+
+### Example with Queuing
+
+```python
+from canbus import CANBus
+
+# Create with custom queue size
+can = CANBus('can0', bitrate=250000, queue_size=200)
+
+# Send - automatically queues if link is down
+can.send(0x100, [0x01, 0x02, 0x03])
+
+# Check queue stats
+stats = can.get_queue_stats()
+print(f"Queued: {stats['queue_length']}, Dropped: {stats['total_dropped']}")
+
+# Check link before critical operations
+if can.is_link_up():
+    print("Link is healthy")
+else:
+    print(f"Link down, {stats['queue_length']} messages queued")
+
+# Manually reset link state after fixing issues
+can.reset_link()  # Also drains queue
+```
+
+### Queue Behavior
+- Messages queued in FIFO order (first in, first out)
+- When queue is full, oldest messages are dropped
+- Queue automatically drains when link recovers
+- Statistics track total queued and dropped counts
 
 ## Examples
 
