@@ -56,3 +56,45 @@ dkms.conf
 
 .settings/
 .venv
+
+
+# STM32CubeIDE/Eclipse generated files and directories
+.metadata/
+.settings/
+.mc/.conf/
+# Per-user project settings (optional, sometimes needed for shared projects)
+.cproject.user
+.mxproject.user
+
+# Build output directories
+# (Debug and Release are common, others may exist)
+Debug/
+Release/
+build/
+
+# Compiled object files, executables, and libraries
+*.o
+*.elf
+*.bin
+*.hex
+*.lib
+*.a
+*.map
+*.su
+
+# Launch configuration files for debugging (user-specific)
+*.launch
+
+# SWO/Trace files
+*.trace*
+
+# IDE specific files
+.dep/
+.log
+*~
+
+# CubeMX temporary files
+# Some users may want to keep the .ioc file tracked
+# to share hardware configuration
+# If you don't want to track it, uncomment the line below
+# *.ioc
