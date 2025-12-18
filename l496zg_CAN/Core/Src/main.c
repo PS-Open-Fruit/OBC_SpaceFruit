@@ -62,7 +62,15 @@ static void MX_CAN1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+    CAN_RxHeaderTypeDef RxHeader;
+    uint8_t RxData[8];
 
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+        // ข้อมูล 8 byte อยู่ใน RxData[] คุณสามารถเอาไปใช้งานต่อตรงนี้ได้เลย
+        // เช่น ถ้าต้องการเช็ค ID: if(RxHeader.StdId == 0x123) { ... }
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -98,6 +106,41 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
+  /* 1. ตั้งค่า Filter เพื่อเปิดรับทุก ID (สำคัญมาก ถ้าไม่ตั้งจะรับข้อมูลไม่ได้) */
+  CAN_FilterTypeDef sFilterConfig;
+
+  sFilterConfig.FilterBank = 0;
+  sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+  sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+  sFilterConfig.FilterIdHigh = 0x0000;
+  sFilterConfig.FilterIdLow = 0x0000;
+  sFilterConfig.FilterMaskIdHigh = 0x0000;
+  sFilterConfig.FilterMaskIdLow = 0x0000;
+  sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+  sFilterConfig.FilterActivation = ENABLE;
+
+  if (HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig) != HAL_OK) {
+      Error_Handler();
+  }
+
+  /* 2. สั่งให้ CAN เริ่มทำงาน */
+  if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+      Error_Handler();
+  }
+
+  /* 3. เปิดการแจ้งเตือนเมื่อมีข้อความเข้าทาง FIFO 0 */
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+  CAN_TxHeaderTypeDef TxHeader;
+  uint8_t TxData[8];
+  uint32_t TxMailbox;
+
+  // ตั้งค่าหัวข้อ CAN (ทำครั้งเดียวพอ)
+  TxHeader.StdId = 0x123;             // ใส่ ID ที่คุณต้องการส่ง (เช่น 0x123)
+  TxHeader.RTR = CAN_RTR_DATA;        // ส่งข้อมูลปกติ
+  TxHeader.IDE = CAN_ID_STD;          // ใช้ Standard ID (11-bit)
+  TxHeader.DLC = 8;                   // ส่งข้อมูล 8 Byte
+  TxHeader.TransmitGlobalTime = DISABLE;
 
   /* USER CODE END 2 */
 
@@ -105,7 +148,28 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+	  // 1. เตรียมข้อมูลที่จะส่ง (ตัวอย่าง: ส่งเลข 0-7)
+	      TxData[0] = 0xAA;
+	      TxData[1] = 0xBB;
+	      TxData[2] = 0xCC;
+	      TxData[3] = 0xDD;
+	      TxData[4] = 0x11;
+	      TxData[5] = 0x22;
+	      TxData[6] = 0x33;
+	      TxData[7] = 0x44;
+
+	      // 2. ตรวจสอบว่ามี Mailbox ว่างให้ส่งไหม เพื่อป้องกัน Error
+	      if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) > 0)
+	      {
+	          // 3. สั่งส่งข้อมูล
+	          if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox) != HAL_OK)
+	          {
+	              /* ถ้าส่งไม่สำเร็จ ให้ใส่โค้ดจัดการตรงนี้ */
+	              Error_Handler();
+	          }
+	      }
+
+	      // 4. หน่วงเวลาเล็กน้อย (เช่น ส่งทุกๆ 500ms)
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 	  HAL_Delay(1500); // ตอนนี้ไฟจะติดค้าง 1.5 วิ และดับค้าง 1.5 วิ สลับกัน
     /* USER CODE END WHILE */
