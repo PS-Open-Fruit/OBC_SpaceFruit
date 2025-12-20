@@ -62,18 +62,21 @@ class CANBus:
     
     def _setup_socketcan(self):
         """Setup SocketCAN with minimal TX queue to prevent buffer buildup"""
-        import os
-        # Bring down interface
-        os.system(f'sudo ip link set {self.interface} down 2>/dev/null')
-        
-        # Configure with small TX queue (10 messages max)
-        # This prevents hardware buffer overflow
-        os.system(f'sudo ip link set {self.interface} type can bitrate {self.bitrate} restart-ms 100')
-        os.system(f'sudo ip link set {self.interface} txqueuelen 10')
-        
-        # Bring up interface
-        os.system(f'sudo ip link set {self.interface} up')
-        time.sleep(0.1)
+        try:
+            import os
+            # Bring down interface
+            os.system(f'sudo ip link set {self.interface} down 2>/dev/null')
+            
+            # Configure with small TX queue (10 messages max)
+            # This prevents hardware buffer overflow
+            os.system(f'sudo ip link set {self.interface} type can bitrate {self.bitrate} restart-ms 100')
+            os.system(f'sudo ip link set {self.interface} txqueuelen 10')
+            
+            # Bring up interface
+            os.system(f'sudo ip link set {self.interface} up')
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"[CAN] Warning: Setup failed ({e}) - attempting to continue...")
     
     def _connect(self):
         """Connect to CAN bus with minimal buffering"""
@@ -116,6 +119,7 @@ class CANBus:
     def send(self, can_id: int, data: List[int], extended: bool = False) -> bool:
         """
         Send CAN message reliably (queues if link down, no data loss)
+        User doesn't need to handle exceptions - all errors caught internally
         
         Args:
             can_id: CAN arbitration ID (0x000-0x7FF standard, 0x1FFFFFFF extended)
@@ -125,98 +129,115 @@ class CANBus:
         Returns:
             True if sent or queued successfully, False only if queue full
         """
-        if not 0 <= len(data) <= 8:
-            raise ValueError("Data must be 0-8 bytes")
-        
-        # Step 1: Try to drain queue if we have pending messages and link is OK
-        if self._link_ok and len(self._msg_queue) > 0:
-            self._drain_queue()
-        
-        # Step 2: If link is down, queue immediately (don't touch hardware buffer)
-        if not self._link_ok:
-            return self._queue_message(can_id, data, extended)
-        
-        # Step 3: Try to send directly (ONE attempt only - KISS)
-        msg = can.Message(arbitration_id=can_id, data=data, is_extended_id=extended)
-        
         try:
-            # Ultra-short timeout to avoid blocking
-            self.bus.send(msg, timeout=0.2)
-            self._fail_count = 0
-            self._sent_total += 1
-            return True
+            # Validate input
+            if not 0 <= len(data) <= 8:
+                print(f"[CAN] Warning: Data must be 0-8 bytes (got {len(data)}), truncating...")
+                data = data[:8] if len(data) > 8 else data
             
-        except Exception as e:
-            # First failure - mark link down and flush hardware buffer
-            self._fail_count += 1
+            # Step 1: Try to drain queue if we have pending messages and link is OK
+            if self._link_ok and len(self._msg_queue) > 0:
+                self._drain_queue()
             
-            if self._fail_count >= 3:
-                if self._link_ok:
-                    print(f"[CAN] Link DOWN - switching to queue mode")
-                    self._link_ok = False
-                    self._flush_hardware_buffer()
+            # Step 2: If link is down, queue immediately (don't touch hardware buffer)
+            if not self._link_ok:
+                return self._queue_message(can_id, data, extended)
             
-            # Queue the failed message
-            return self._queue_message(can_id, data, extended)
-    
-    def _queue_message(self, can_id: int, data: List[int], extended: bool) -> bool:
-        """Queue message in RAM (not hardware buffer)"""
-        old_len = len(self._msg_queue)
-        self._msg_queue.append((can_id, data.copy(), extended))
-        
-        # Check if message was dropped due to queue limit
-        if self._queue_size > 0 and len(self._msg_queue) <= old_len:
-            self._dropped_total += 1
-            print(f"[CAN] DROPPED (queue full: {self._queue_size}) - total: {self._dropped_total}")
-            return False
-        
-        self._queued_total += 1
-        if len(self._msg_queue) % 50 == 1:  # Print every 50 messages
-            print(f"[CAN] Queued: {len(self._msg_queue)} msgs")
-        
-        return True
-    
-    def _drain_queue(self):
-        """Send queued messages when link recovers (fast drain with small timeout)"""
-        if len(self._msg_queue) == 0:
-            return
-        
-        # Drain ALL queued messages as fast as possible
-        # Use small timeout to avoid blocking but still allow hardware to accept messages
-        initial_count = len(self._msg_queue)
-        
-        if initial_count > 10:
-            print(f"[CAN] Draining {initial_count} queued messages...")
-        
-        sent = 0
-        failed = False
-        
-        # Drain EVERYTHING in the queue at maximum speed
-        while self._msg_queue:
-            can_id, data, extended = self._msg_queue[0]
+            # Step 3: Try to send directly (ONE attempt only - KISS)
             msg = can.Message(arbitration_id=can_id, data=data, is_extended_id=extended)
             
             try:
-                # Small timeout = fast but won't fail if buffer temporarily full
-                self.bus.send(msg, timeout=0.01)  # 10ms timeout
-                self._msg_queue.popleft()
-                sent += 1
+                # Ultra-short timeout to avoid blocking
+                self.bus.send(msg, timeout=0.2)
+                self._fail_count = 0
                 self._sent_total += 1
-                    
-            except Exception:
-                # Failed during drain - stop immediately
-                failed = True
-                if len(self._msg_queue) > 10:
-                    print(f"[CAN] Drain failed - {len(self._msg_queue)} msgs remain in queue")
-                self._link_ok = False  # Keep link marked as DOWN
-                break
+                return True
+                
+            except Exception as e:
+                # First failure - mark link down and flush hardware buffer
+                self._fail_count += 1
+                
+                if self._fail_count >= 3:
+                    if self._link_ok:
+                        print(f"[CAN] Link DOWN - switching to queue mode")
+                        self._link_ok = False
+                        self._flush_hardware_buffer()
+                
+                # Queue the failed message
+                return self._queue_message(can_id, data, extended)
         
-        if not failed and len(self._msg_queue) == 0:
-            print(f"[CAN] Queue drained successfully ({sent} msgs) - link UP")
-            self._link_ok = True
-            self._fail_count = 0
-        elif not failed and sent > 0:
-            print(f"[CAN] Drained {sent} msgs - {len(self._msg_queue)} remain")
+        except Exception as e:
+            # Catch ALL exceptions - library should never crash user's application
+            print(f"[CAN] Unexpected error in send(): {e} - queueing message")
+            return self._queue_message(can_id, data, extended)
+    
+    def _queue_message(self, can_id: int, data: List[int], extended: bool) -> bool:
+        """Queue message in RAM (not hardware buffer) - never throws exceptions"""
+        try:
+            old_len = len(self._msg_queue)
+            self._msg_queue.append((can_id, data.copy(), extended))
+            
+            # Check if message was dropped due to queue limit
+            if self._queue_size > 0 and len(self._msg_queue) <= old_len:
+                self._dropped_total += 1
+                print(f"[CAN] DROPPED (queue full: {self._queue_size}) - total: {self._dropped_total}")
+                return False
+            
+            self._queued_total += 1
+            if len(self._msg_queue) % 50 == 1:  # Print every 50 messages
+                print(f"[CAN] Queued: {len(self._msg_queue)} msgs")
+            
+            return True
+        except Exception as e:
+            print(f"[CAN] Queue error: {e}")
+            return False
+    
+    def _drain_queue(self):
+        """Send queued messages when link recovers (fast drain with small timeout) - never throws"""
+        try:
+            if len(self._msg_queue) == 0:
+                return
+            
+            # Drain ALL queued messages as fast as possible
+            # Use small timeout to avoid blocking but still allow hardware to accept messages
+            initial_count = len(self._msg_queue)
+            
+            if initial_count > 10:
+                print(f"[CAN] Draining {initial_count} queued messages...")
+            
+            sent = 0
+            failed = False
+            
+            # Drain EVERYTHING in the queue at maximum speed
+            while self._msg_queue:
+                can_id, data, extended = self._msg_queue[0]
+                msg = can.Message(arbitration_id=can_id, data=data, is_extended_id=extended)
+                
+                try:
+                    # Small timeout = fast but won't fail if buffer temporarily full
+                    self.bus.send(msg, timeout=0.01)  # 10ms timeout
+                    self._msg_queue.popleft()
+                    sent += 1
+                    self._sent_total += 1
+                        
+                except Exception:
+                    # Failed during drain - stop immediately
+                    failed = True
+                    if len(self._msg_queue) > 10:
+                        print(f"[CAN] Drain failed - {len(self._msg_queue)} msgs remain in queue")
+                    self._link_ok = False  # Keep link marked as DOWN
+                    break
+            
+            if not failed and len(self._msg_queue) == 0:
+                print(f"[CAN] Queue drained successfully ({sent} msgs) - link UP")
+                self._link_ok = True
+                self._fail_count = 0
+            elif not failed and sent > 0:
+                print(f"[CAN] Drained {sent} msgs - {len(self._msg_queue)} remain")
+        
+        except Exception as e:
+            print(f"[CAN] Drain error: {e}")
+            self._link_ok = False
 
     
     def _flush_hardware_buffer(self):
@@ -239,49 +260,57 @@ class CANBus:
     
     def receive(self, timeout: float = 1.0) -> Optional[Tuple[int, List[int]]]:
         """
-        Receive CAN message from RX buffer
+        Receive CAN message from RX buffer - never throws exceptions
         
         Args:
             timeout: Timeout in seconds (waits for message in buffer)
             
         Returns:
-            (can_id, data) or None if timeout
+            (can_id, data) or None if timeout/error
         """
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            with self._rx_lock:
-                if self._rx_buffer:
-                    return self._rx_buffer.popleft()
-            time.sleep(0.01)  # Small sleep to avoid busy-waiting
-        return None
+        try:
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                with self._rx_lock:
+                    if self._rx_buffer:
+                        return self._rx_buffer.popleft()
+                time.sleep(0.01)  # Small sleep to avoid busy-waiting
+            return None
+        except Exception as e:
+            print(f"[CAN] Receive error: {e}")
+            return None
     
     def receive_all(self, timeout: float = 0.01, max_msgs: int = 100) -> List[Tuple[int, List[int]]]:
         """
-        Receive all available messages (bulk read from RX buffer)
+        Receive all available messages (bulk read from RX buffer) - never throws exceptions
         
         Args:
             timeout: Timeout for first message (not used with buffer)
             max_msgs: Max messages per call
             
         Returns:
-            List of (can_id, data) tuples
+            List of (can_id, data) tuples (empty list on error)
         """
-        messages = []
-        
-        # Read from RX buffer (populated by background thread)
-        with self._rx_lock:
-            # Get up to max_msgs from buffer
-            count = min(len(self._rx_buffer), max_msgs)
-            for _ in range(count):
-                if self._rx_buffer:
-                    messages.append(self._rx_buffer.popleft())
-        
-        return messages
+        try:
+            messages = []
+            
+            # Read from RX buffer (populated by background thread)
+            with self._rx_lock:
+                # Get up to max_msgs from buffer
+                count = min(len(self._rx_buffer), max_msgs)
+                for _ in range(count):
+                    if self._rx_buffer:
+                        messages.append(self._rx_buffer.popleft())
+            
+            return messages
+        except Exception as e:
+            print(f"[CAN] Receive all error: {e}")
+            return []
     
     def send_with_ack(self, can_id: int, data: List[int], ack_id: Optional[int] = None, 
                       timeout: float = 0.5, max_retries: int = 1, extended: bool = False) -> bool:
         """
-        Send message and wait for ACK (guarantees delivery to destination)
+        Send message and wait for ACK (guarantees delivery to destination) - never throws exceptions
         Uses background RX thread for non-blocking ACK reception
         
         Args:
@@ -293,41 +322,45 @@ class CANBus:
             extended: Use extended ID format
             
         Returns:
-            True if ACK received, False if failed after retries
+            True if ACK received, False if failed after retries or error
         """
-        if ack_id is None:
-            ack_id = can_id + 1
-        
-        for attempt in range(max_retries):
-            # Send the message
-            if not self.send(can_id, data, extended):
-                # Send failed (queue full)
-                return False
+        try:
+            if ack_id is None:
+                ack_id = can_id + 1
             
-            # Wait for ACK - check RX buffer instead of blocking on recv()
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                # Check RX buffer for ACK
-                with self._rx_lock:
-                    for i, (rx_id, rx_data) in enumerate(self._rx_buffer):
-                        # Check if this is our ACK (ID matches and first byte is 0xFF)
-                        if rx_id == ack_id and len(rx_data) > 0 and rx_data[0] == 0xFF:
-                            # Remove ACK from buffer and return success
-                            del self._rx_buffer[i]
-                            return True
+            for attempt in range(max_retries):
+                # Send the message
+                if not self.send(can_id, data, extended):
+                    # Send failed (queue full)
+                    return False
                 
-                # Small sleep to avoid busy-waiting
-                time.sleep(0.01)
+                # Wait for ACK - check RX buffer instead of blocking on recv()
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    # Check RX buffer for ACK
+                    with self._rx_lock:
+                        for i, (rx_id, rx_data) in enumerate(self._rx_buffer):
+                            # Check if this is our ACK (ID matches and first byte is 0xFF)
+                            if rx_id == ack_id and len(rx_data) > 0 and rx_data[0] == 0xFF:
+                                # Remove ACK from buffer and return success
+                                del self._rx_buffer[i]
+                                return True
+                    
+                    # Small sleep to avoid busy-waiting
+                    time.sleep(0.01)
+                
+                # No ACK received
+                if attempt < max_retries - 1:
+                    time.sleep(0.05)  # Brief pause before retry
             
-            # No ACK received
-            if attempt < max_retries - 1:
-                time.sleep(0.05)  # Brief pause before retry
-        
-        return False
+            return False
+        except Exception as e:
+            print(f"[CAN] Send with ACK error: {e}")
+            return False
     
     def send_ack(self, original_id: int, original_data: List[int], extended: bool = False) -> bool:
         """
-        Send ACK for received message (non-blocking, fire-and-forget)
+        Send ACK for received message (non-blocking, fire-and-forget) - never throws exceptions
         
         Args:
             original_id: CAN ID of message being acknowledged
@@ -335,74 +368,96 @@ class CANBus:
             extended: Use extended ID format
             
         Returns:
-            True if ACK sent successfully
+            True if ACK sent successfully, False on error (safe to ignore)
         """
-        ack_id = original_id + 1
-        ack_data = [0xFF, original_data[0] if original_data else 0x00]
-        
-        # Use direct bus.send() with zero timeout for non-blocking ACK
-        msg = can.Message(arbitration_id=ack_id, data=ack_data, is_extended_id=extended)
         try:
+            ack_id = original_id + 1
+            ack_data = [0xFF, original_data[0] if original_data else 0x00]
+            
+            # Use direct bus.send() with zero timeout for non-blocking ACK
+            msg = can.Message(arbitration_id=ack_id, data=ack_data, is_extended_id=extended)
             self.bus.send(msg, timeout=0)  # Non-blocking
             return True
         except:
-            return False  # ACK failed, but don't block
+            return False  # ACK failed, but don't block or crash
 
     
     def check_link(self) -> bool:
         """
-        Manually check link health (attempts to send/drain)
+        Manually check link health (attempts to send/drain) - never throws exceptions
         Call this periodically from your main loop
         
         Returns:
-            True if link is up
+            True if link is up, False if down or error
         """
-        if not self._link_ok:
-            # Try to drain queue (this will mark link up if successful)
-            self._drain_queue()
-        
-        return self._link_ok
+        try:
+            if not self._link_ok:
+                # Try to drain queue (this will mark link up if successful)
+                self._drain_queue()
+            
+            return self._link_ok
+        except Exception as e:
+            print(f"[CAN] Check link error: {e}")
+            return False
     
     def get_stats(self) -> dict:
         """
-        Get statistics
+        Get statistics - never throws exceptions
         
         Returns:
-            Dictionary with queue and transmission stats
+            Dictionary with queue and transmission stats (safe defaults on error)
         """
-        return {
-            'link_up': self._link_ok,
-            'queue_length': len(self._msg_queue),
-            'queue_max': self._queue_size,
-            'total_sent': self._sent_total,
-            'total_queued': self._queued_total,
-            'total_dropped': self._dropped_total,
-        }
+        try:
+            return {
+                'link_up': self._link_ok,
+                'queue_length': len(self._msg_queue),
+                'queue_max': self._queue_size,
+                'total_sent': self._sent_total,
+                'total_queued': self._queued_total,
+                'total_dropped': self._dropped_total,
+            }
+        except Exception as e:
+            print(f"[CAN] Get stats error: {e}")
+            return {
+                'link_up': False,
+                'queue_length': 0,
+                'queue_max': 0,
+                'total_sent': 0,
+                'total_queued': 0,
+                'total_dropped': 0,
+            }
     
     def clear_queue(self):
-        """Clear all queued messages (use with caution - data loss!)"""
-        cleared = len(self._msg_queue)
-        self._msg_queue.clear()
-        if cleared > 0:
-            print(f"[CAN] Cleared {cleared} queued messages")
-        return cleared
+        """Clear all queued messages (use with caution - data loss!) - never throws exceptions"""
+        try:
+            cleared = len(self._msg_queue)
+            self._msg_queue.clear()
+            if cleared > 0:
+                print(f"[CAN] Cleared {cleared} queued messages")
+            return cleared
+        except Exception as e:
+            print(f"[CAN] Clear queue error: {e}")
+            return 0
     
     def close(self):
-        """Close CAN bus and report final statistics"""
-        # Stop RX thread
-        self._rx_running = False
-        if self._rx_thread:
-            self._rx_thread.join(timeout=1.0)
-        
-        stats = self.get_stats()
-        print(f"[CAN] Closing - Stats: {stats}")
-        
-        if self.bus:
-            self.bus.shutdown()
-        
-        if self._is_pi:
-            import os
-            os.system(f'sudo ip link set {self.interface} down 2>/dev/null')
+        """Close CAN bus and report final statistics - never throws exceptions"""
+        try:
+            # Stop RX thread
+            self._rx_running = False
+            if self._rx_thread:
+                self._rx_thread.join(timeout=1.0)
+            
+            stats = self.get_stats()
+            print(f"[CAN] Closing - Stats: {stats}")
+            
+            if self.bus:
+                self.bus.shutdown()
+            
+            if self._is_pi:
+                import os
+                os.system(f'sudo ip link set {self.interface} down 2>/dev/null')
+        except Exception as e:
+            print(f"[CAN] Close error: {e} (continuing anyway)")
     
     def __enter__(self):
         return self

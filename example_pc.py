@@ -2,39 +2,37 @@
 """
 Example: PC with USB CAN adapter - receiver with ACK
 Confirms data reception back to sender
+
+No error handling needed - library handles everything!
 """
 
 from canbus import CANBus
 import time
 
 def main():
-    # Initialize USB CAN adapter
+    # Initialize USB CAN adapter (library handles all errors internally)
     print("Starting PC CAN interface with ACK...")
     can = CANBus('COM3', bitrate=250000)  # Change COM port as needed
     
-    try:
-        while True:
-            # Bulk receive for efficiency
-            messages = can.receive_all(timeout=0.1, max_msgs=100)
+    # Simple infinite loop - no try/except needed!
+    while True:
+        # Bulk receive for efficiency
+        messages = can.receive_all(timeout=0.1, max_msgs=100)
+        
+        for can_id, data in messages:
+            print(f"[RX] ID=0x{can_id:X}, Data={[f'{b:#04x}({b})' for b in data]}")
             
-            for can_id, data in messages:
-                print(f"[RX] ID=0x{can_id:X}, Data={[f'{b:#04x}({b})' for b in data]}")
-                
-                # Send ACK for telemetry messages (ID 0x100)
-                if can_id == 0x100:
-                    # Send ACK without blocking/checking if it succeeds
-                    try:
-                        can.send_ack(can_id, data)
-                        print(f"     ↳ ACK sent")
-                    except:
-                        print(f"     ↳ ACK failed (bus busy)")
-            
-            time.sleep(0.01)
-            
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-    finally:
-        can.close()
+            # Send ACK for telemetry messages (ID 0x100)
+            if can_id == 0x100:
+                # Just call send_ack - library handles all errors
+                can.send_ack(can_id, data)
+                print(f"     ↳ ACK sent")
+        
+        time.sleep(0.01)
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+
