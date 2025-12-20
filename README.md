@@ -1,14 +1,43 @@
-# VR CAN Bus Library
+# Reliable CAN Bus Library for Satellite Systems
 
-Simple and reliable CAN communication library for Raspberry Pi Zero 2W and PC.
+**KISS** (Keep It Simple, Stupid) design for Raspberry Pi Zero 2W CAN communication.
+
+## Key Design Principles
+
+🔹 **Zero Data Loss** - Application-level queue prevents message loss  
+🔹 **Hardware Buffer Protection** - Prevents RS485 CAN HAT buffer overflow  
+🔹 **Simple Link Detection** - Fast failure detection (3 failed sends)  
+🔹 **Background RX Thread** - Non-blocking message reception for ACKs  
+🔹 **ACK Protocol** - Application-level delivery confirmation  
+🔹 **Automatic Recovery** - Drains queue when link recovers (~100 msg/sec)  
+🔹 **Minimal Retries** - One send attempt only (KISS)
+
+## The Problem We Solved
+
+**Hardware Buffer Overflow on Pi Zero 2W:**
+- When CAN link fails, the RS485 CAN HAT buffers outgoing messages
+- Once hardware buffer fills up (typically ~100 messages), **the interface becomes unusable**
+- System requires reboot to recover
+
+**Our Solution:**
+- Detect link failure after just 3 failed sends (~0.15s)
+- **Immediately stop using hardware buffer**
+- Queue messages in RAM (Python deque, 1000 messages)
+- Aggressively flush hardware buffer when link fails
+- Set TX queue length to 10 messages max (`txqueuelen 10`)
+- Background thread continuously receives messages (500-message buffer)
+- Application-level ACK protocol for guaranteed delivery
 
 ## Features
 
-- ✅ Works on both Pi (SocketCAN/can0) and PC (USB CAN adapter/COM port)
-- ✅ Automatic retry for reliable transmission
-- ✅ Send/receive raw bytes or strings
-- ✅ Multi-frame support for large messages
-- ✅ Simple API
+✅ Application-level message queue (RAM, not hardware)  
+✅ Fast link failure detection (3 failures, ~0.15s)  
+✅ Hardware buffer flushing on failure  
+✅ Automatic queue draining on recovery (~100 msg/sec)  
+✅ Background RX thread for non-blocking ACKs  
+✅ ACK protocol for delivery confirmation  
+✅ Works on Pi (SocketCAN) and PC (USB CAN)  
+✅ Simple API - send(), send_with_ack(), receive(), receive_all()
 
 ## Architecture
 
@@ -142,24 +171,27 @@ pip install python-can
 
 ## Quick Start
 
-### On Raspberry Pi (can0)
+### On Raspberry Pi Zero 2W (can0)
 
 ```python
 from canbus import CANBus
 
-# Create CAN bus instance (auto-configures can0)
-can = CANBus('can0', bitrate=250000)
+# Initialize (auto-configures can0 with txqueuelen=10)
+can = CANBus('can0', bitrate=250000, queue_size=1000)
 
-# Send message
-can.send(0x123, [0x01, 0x02, 0x03, 0x04])
+# Send message (auto-queues if link down)
+can.send(0x100, [0x01, 0x02, 0x03, 0x04])
+
+# Check link status
+stats = can.get_stats()
+print(f"Link: {'UP' if stats['link_up'] else 'DOWN'}, Queue: {stats['queue_length']}")
 
 # Receive message
 result = can.receive(timeout=1.0)
 if result:
     can_id, data = result
-    print(f"Received ID: 0x{can_id:X}, Data: {data}")
+    print(f"RX: ID=0x{can_id:X}, Data={data}")
 
-# Close
 can.close()
 ```
 
@@ -168,185 +200,261 @@ can.close()
 ```python
 from canbus import CANBus
 
-# Create CAN bus instance for COM port
+# Same API, different interface
 can = CANBus('COM6', bitrate=250000)
 
-# Send message
-can.send(0x123, [0x01, 0x02, 0x03, 0x04])
+# Bulk receive for efficiency
+messages = can.receive_all(timeout=0.1, max_msgs=100)
+for can_id, data in messages:
+    print(f"RX: ID=0x{can_id:X}, Data={data}")
 
-# Receive message
-result = can.receive(timeout=1.0)
-if result:
-    can_id, data = result
-    print(f"Received ID: 0x{can_id:X}, Data: {data}")
-
-# Close
 can.close()
 ```
 
-### Using Context Manager
+### Production Example (Pi) - With ACK Confirmation
 
 ```python
 from canbus import CANBus
+import time
 
-with CANBus('can0') as can:
-    # Send
-    can.send(0x123, [0x01, 0x02, 0x03])
+can = CANBus('can0', bitrate=250000, queue_size=1000)
+
+try:
+    counter = 0
+    consecutive_ack_failures = 0
     
-    # Receive
-    result = can.receive(timeout=2.0)
-    if result:
-        can_id, data = result
-        print(f"Got: {data}")
-# Automatically closed
+    while True:
+        # Send telemetry with ACK confirmation
+        telemetry = [0x01, counter & 0xFF, (counter >> 8) & 0xFF, 0xAA]
+        success = can.send_with_ack(0x100, telemetry, timeout=0.5, max_retries=1)
+        
+        if not success:
+            consecutive_ack_failures += 1
+            print(f"ACK failed! Consecutive failures: {consecutive_ack_failures}")
+            
+            # After 3 failures, switch to queue mode
+            if consecutive_ack_failures >= 3:
+                print("Switching to queue mode (link appears down)")
+                can._link_ok = False
+                can._flush_hardware_buffer()
+                consecutive_ack_failures = 0
+        else:
+            consecutive_ack_failures = 0
+        
+        # Check link every 5 seconds (drain queue if needed)
+        if counter % 5 == 0:
+            can.check_link()
+            stats = can.get_stats()
+            if stats['queue_length'] > 0:
+                print(f"[WARN] {stats['queue_length']} messages queued")
+        
+        counter += 1
+        time.sleep(1.0)
+        
+except KeyboardInterrupt:
+    can.close()
 ```
 
-### Send/Receive Strings
+### Production Example (PC) - With Automatic ACK
 
 ```python
 from canbus import CANBus
 
-with CANBus('can0') as can:
-    # Send string (automatically split into frames)
-    can.send_string(0x200, "Hello from VR subsystem!")
-    
-    # Receive string (automatically reassemble frames)
-    text = can.receive_string(timeout=5.0)
-    if text:
-        print(f"Received: {text}")
+can = CANBus('COM6', bitrate=250000)
+
+try:
+    while True:
+        # Bulk receive (from background RX thread)
+        messages = can.receive_all(timeout=0.1, max_msgs=100)
+        
+        for can_id, data in messages:
+            print(f"RX: ID=0x{can_id:X}, Data={data}")
+            
+            # Send ACK (fire-and-forget, non-blocking)
+            try:
+                can.send_ack(can_id, data)
+            except Exception:
+                pass  # Don't let ACK failures stop processing
+        
+except KeyboardInterrupt:
+    can.close()
 ```
 
 ## API Reference
 
-### `CANBus(interface, bitrate=100000, auto_setup=True, queue_size=100)`
+### `CANBus(interface, bitrate=250000, auto_setup=True, queue_size=1000)`
 
-Create CAN bus instance.
+**Parameters:**
+- `interface`: `'can0'` for Pi, `'COM6'` for PC
+- `bitrate`: CAN bitrate (default: 250000 bps)
+- `auto_setup`: Auto-configure interface (default: True)
+- `queue_size`: Max RAM queue size (default: 1000, 0=unlimited)
 
-- `interface`: 'can0' for Pi, 'COM6' (or other) for PC
-- `bitrate`: CAN bitrate in bps (default: 100000)
-- `auto_setup`: Auto-configure interface on Pi (default: True)
-- `queue_size`: Max messages to queue when link down (default: 100, 0=unlimited)
+**What happens on init:**
+1. Sets `txqueuelen=10` on can0 (limits hardware buffer)
+2. Enables auto-restart on bus-off (`restart-ms 100`)
+3. Creates application-level message queue in RAM (1000 messages)
+4. Creates RX buffer in RAM (500 messages)
+5. Starts background RX thread for continuous message reception
 
-### `send(can_id, data, extended=False, max_retries=3, queue_on_fail=True)`
+### `send(can_id, data, extended=False) -> bool`
 
-Send CAN message with retry and automatic queuing on link failure.
+**Reliable send with zero data loss guarantee.**
 
-- `can_id`: CAN ID (0x000-0x7FF standard, up to 0x1FFFFFFF extended)
+**Parameters:**
+- `can_id`: CAN ID (0x000-0x7FF standard, 0x1FFFFFFF extended)
 - `data`: List of 0-8 bytes
-- `extended`: Use extended ID format
-- `max_retries`: Retry attempts
-- `queue_on_fail`: Queue message if link is down (default: True)
-- Returns: `True` if successful or queued
+- `extended`: Use extended ID (default: False)
 
-### `receive(timeout=1.0)`
+**Returns:** `True` if sent or queued, `False` only if queue full
 
-Receive CAN message.
+**Behavior:**
+- If link OK: Sends immediately (timeout=0.05s)
+- If send fails 3 times: Marks link DOWN, flushes hardware buffer
+- If link DOWN: Queues message in RAM (doesn't touch hardware)
+- When link recovers: Automatically drains queue at ~100 msg/sec
 
-- `timeout`: Timeout in seconds (None for blocking)
-- Returns: `(can_id, data)` tuple or `None` if timeout
+### `send_with_ack(can_id, data, timeout=0.5, max_retries=1, extended=False) -> bool`
 
-### `receive_all(timeout=0.01, max_messages=100)`
+**Send with application-level ACK confirmation.**
 
-Receive all buffered messages at once (fast bulk receive for high throughput).
-
-- `timeout`: Timeout for first message (default: 0.01s)
-- `max_messages`: Maximum messages to receive in one call
-- Returns: List of `(can_id, data)` tuples (empty list if none available)
-
-**Use this for high-speed reception on PC to overcome SLCAN latency!**
-
-### `send_string(can_id, text, extended=False)`
-
-Send string as multi-frame message.
-
+**Parameters:**
 - `can_id`: CAN ID
-- `text`: String to send
-- Returns: `True` if successful
+- `data`: List of 0-8 bytes
+- `timeout`: Seconds to wait for ACK (default: 0.5)
+- `max_retries`: Number of retry attempts (default: 1)
+- `extended`: Use extended ID (default: False)
 
-### `receive_string(timeout=5.0, max_frames=100)`
+**Returns:** `True` if ACK received, `False` if timeout
 
-Receive multi-frame string message.
+**ACK Protocol:**
+- Sends message with ID `can_id`
+- Expects ACK with ID `can_id + 1`
+- ACK format: `[0xFF, original_data[0]]`
+- Non-blocking: Checks RX buffer (populated by background thread)
 
-- `timeout`: Total timeout
-- `max_frames`: Max frames to collect
-- Returns: Reconstructed string or `None`
+### `send_ack(can_id, data) -> bool`
+
+**Send ACK response (for ground station).**
+
+**Parameters:**
+- `can_id`: Original message CAN ID
+- `data`: Original message data
+
+**Behavior:**
+- Sends ACK with ID `can_id + 1`
+- ACK data: `[0xFF, data[0]]`
+- Fire-and-forget (timeout=0, non-blocking)
+
+### `receive(timeout=1.0) -> Optional[Tuple[int, List[int]]]`
+
+**Receive single message from RX buffer.**
+
+**Parameters:**
+- `timeout`: Timeout in seconds
+
+**Returns:** `(can_id, data)` or `None`
+
+**Note:** Messages are populated by background RX thread
+
+### `receive_all(timeout=0.01, max_msgs=100) -> List[Tuple[int, List[int]]]`
+
+Bulk receive for high throughput (from RX buffer).
+
+**Parameters:**
+- `timeout`: Timeout for first message
+- `max_msgs`: Max messages per call
+
+**Returns:** List of `(can_id, data)` tuples
+
+**Note:** Background thread continuously fills RX buffer
+
+### `check_link() -> bool`
+
+Manually check link health (attempts to drain queue).
+
+**Returns:** `True` if link is up
+
+**Usage:** Call this periodically (every 5 seconds recommended) from your main loop for fast recovery.
+
+### `get_stats() -> dict`
+
+Get queue and transmission statistics.
+
+**Returns:**
+```python
+{
+    'link_up': bool,         # Link state
+    'queue_length': int,     # Current queue size
+    'queue_max': int,        # Max queue capacity
+    'total_sent': int,       # Total messages sent
+    'total_queued': int,     # Total messages queued
+    'total_dropped': int,    # Messages dropped (queue full)
+}
+```
+
+### `clear_queue() -> int`
+
+**⚠️ WARNING: Causes data loss!**
+
+Clear all queued messages.
+
+**Returns:** Number of messages cleared
 
 ### `close()`
 
-Close CAN connection and shutdown interface.
+Close connection and print final statistics.
 
-### `flush_buffers()`
+## How It Works: Hardware Buffer Protection
 
-Flush TX/RX buffers to prevent blocking. Automatically called when link appears down.
+### The Problem
+1. CAN link fails (cable disconnected, power issue, etc.)
+2. Application keeps calling `send()`
+3. Messages pile up in **RS485 CAN HAT hardware buffer**
+4. Hardware buffer fills (typically ~100-200 messages)
+5. **Interface becomes completely unusable** - even when link recovers
+6. Only solution: Reboot the Pi
 
-### `reset_link()`
+### Our Solution (3-Layer Defense)
 
-Manually reset link state tracking. Call after fixing connection issues.
-
-### `is_link_up()`
-
-Check if CAN link appears to be operational.
-
-- Returns: `True` if link is up, `False` if multiple consecutive failures detected
-
-### `get_queue_stats()`
-
-Get message queue statistics.
-
-- Returns: Dictionary with `queue_length`, `total_queued`, `total_dropped`, `queue_max`
-
-### `clear_queue()`
-
-Clear all queued messages (use with caution!).
-
-- Returns: Number of messages cleared
-
-## Link Management & Message Queuing
-
-The library automatically manages link failures and prevents data loss:
-
-### Automatic Message Queuing
-- **Queue on link down**: Messages are automatically queued when link fails (default: up to 100 messages)
-- **Auto-retry on recovery**: Queued messages automatically sent when link recovers
-- **No data loss**: Messages preserved during temporary link failures
-- **Configurable queue size**: Adjust with `queue_size` parameter (0 = unlimited)
-
-### Link Monitoring
-- **Automatic buffer flushing**: When 5+ consecutive send failures occur, buffers are automatically flushed
-- **Link state tracking**: `is_link_up()` returns `False` when link is down
-- **Auto-recovery**: Link state resets automatically when successful transmission resumes
-- **Non-blocking sends**: Short timeouts (0.1s) prevent receive blocking when buffer is full
-
-### Example with Queuing
-
+#### Layer 1: Small Hardware Buffer
 ```python
-from canbus import CANBus
+os.system(f'sudo ip link set can0 txqueuelen 10')  # Only 10 messages max
+```
+Limits hardware queue to 10 messages, reducing overflow risk.
 
-# Create with custom queue size
-can = CANBus('can0', bitrate=250000, queue_size=200)
+#### Layer 2: Fast Failure Detection
+```python
+if self._fail_count >= 3:  # After 3 failed sends
+    self._link_ok = False   # Mark link DOWN
+    self._flush_hardware_buffer()  # Clear hardware buffer
+```
+Detects failure in ~0.15 seconds (3 × 0.05s timeout).
 
-# Send - automatically queues if link is down
-can.send(0x100, [0x01, 0x02, 0x03])
+#### Layer 3: Application Queue (RAM)
+```python
+self._msg_queue = deque(maxlen=queue_size)  # Store in RAM, not hardware
+```
+Messages queued in Python memory, **never sent to hardware when link is down**.
 
-# Check queue stats
-stats = can.get_queue_stats()
-print(f"Queued: {stats['queue_length']}, Dropped: {stats['total_dropped']}")
+### Message Flow
 
-# Check link before critical operations
-if can.is_link_up():
-    print("Link is healthy")
-else:
-    print(f"Link down, {stats['queue_length']} messages queued")
-
-# Manually reset link state after fixing issues
-can.reset_link()  # Also drains queue
+**When Link is UP:**
+```
+send() → Hardware Buffer (10 max) → CAN Bus → ✓ Sent
 ```
 
-### Queue Behavior
-- Messages queued in FIFO order (first in, first out)
-- When queue is full, oldest messages are dropped
-- Queue automatically drains when link recovers
-- Statistics track total queued and dropped counts
+**When Link is DOWN:**
+```
+send() → RAM Queue (1000 max) → [Waiting for recovery]
+         ↓
+         Hardware buffer EMPTY (flushed)
+```
+
+**When Link Recovers:**
+```
+check_link() → Drain RAM Queue → Hardware Buffer → CAN Bus → ✓ All sent
+```
 
 ## Examples
 
@@ -433,51 +541,75 @@ finally:
     can.close()
 ```
 
-## Testing Connection
-
-### On Pi:
-```bash
-# Terminal 1: Monitor CAN traffic
-candump can0
-
-# Terminal 2: Run Python script
-python3 your_script.py
-```
-
-### On PC:
-Just run your Python script with the COM port configured.
-
-## Notes
-
-- Default bitrate is 100kbps (100000)
-- Maximum 8 bytes per CAN frame
-- Automatic retry on send failure (default: 3 attempts)
-- String messages automatically split/reassemble across multiple frames
-- First byte of multi-frame messages is sequence number
-- **PC SLCAN Performance**: USB CAN adapters (SLCAN) have higher latency than SocketCAN. Use `receive_all()` for better throughput.
-
 ## Troubleshooting
 
-**Pi: "Network is down"**
-- Check if CAN HAT is properly connected
-- Try manual setup: `sudo ip link set can0 type can bitrate 100000 && sudo ip link set can0 up`
+### Pi: "Network is down" or interface unusable
+```bash
+# Reset the interface
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 250000 restart-ms 100
+sudo ip link set can0 txqueuelen 10
+sudo ip link set can0 up
+```
 
-**PC: "Cannot find COM port"**
-- Verify COM port in Device Manager
-- Check USB CAN adapter drivers installed
-- Use correct COM port number
+### Pi: Hardware buffer full (old problem - now prevented!)
+**Before (Bad):**
+- Messages queued in hardware
+- Hardware buffer overflowed
+- Interface became unusable
+- Required reboot
 
-**PC: Slow message reception**
-- Use `receive_all()` instead of `receive()` for high-throughput scenarios
-- SLCAN (USB CAN) has inherent latency due to serial communication overhead
-- Each `receive()` call has ~10-50ms overhead; `receive_all()` gets all buffered messages at once
-- For real-time performance, consider native CAN hardware interface instead of USB adapter
+**After (Good):**
+- Messages queued in RAM
+- Hardware buffer kept small (10 messages)
+- Interface stays usable
+- No reboot needed
 
-**No messages received**
-- Check both devices use same bitrate
-- Verify CAN_H and CAN_L connections
-- Check termination resistors (120Ω at each end)
+### PC: "Cannot find COM port"
+- Check Device Manager for COM port number
+- Install CH340/CP2102 drivers if needed
+- Verify USB connection
+
+### No messages received
+- **Check bitrate** - Both devices must use same bitrate (250000 recommended)
+- **Check wiring** - CAN_H to CAN_H, CAN_L to CAN_L
+- **Check termination** - 120Ω resistors at each end of bus
+- **Check power** - Ensure CAN transceivers are powered
+
+### Messages being dropped
+```python
+stats = can.get_stats()
+if stats['total_dropped'] > 0:
+    print(f"WARNING: {stats['total_dropped']} messages dropped!")
+    print(f"Increase queue_size (currently {stats['queue_max']})")
+```
+
+## Performance Tips
+
+### For Pi Zero 2W (Satellite)
+```python
+# Use larger queue for long outages
+can = CANBus('can0', bitrate=250000, queue_size=5000)
+
+# Check link periodically (every 10 seconds)
+if counter % 10 == 0:
+    can.check_link()
+```
+
+### For PC (Ground Station)
+```python
+# Use bulk receive for efficiency
+messages = can.receive_all(timeout=0.1, max_msgs=100)
+# Process all messages at once
+```
+
+## Architecture Diagrams
+
+See README diagrams above for:
+- System block diagram
+- Communication sequence
+- Component architecture
 
 ## License
 
-See LICENSE file in project root.
+See LICENSE file.

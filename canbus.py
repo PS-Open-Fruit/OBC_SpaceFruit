@@ -7,10 +7,12 @@ KISS Design:
 - Queue messages in RAM (not hardware buffer)
 - Flush hardware buffers when link fails
 - Simple retry logic
+- Background thread for continuous ACK reception
 """
 
 import can
 import time
+import threading
 from typing import Optional, List, Tuple
 from collections import deque
 
@@ -41,6 +43,12 @@ class CANBus:
         self._queue_size = queue_size
         self._msg_queue = deque(maxlen=queue_size if queue_size > 0 else None)
         
+        # RX buffer for ACKs (accessed by background thread)
+        self._rx_buffer = deque(maxlen=500)  # Larger buffer for bursts
+        self._rx_lock = threading.Lock()
+        self._rx_thread = None
+        self._rx_running = False
+        
         # Statistics
         self._queued_total = 0
         self._dropped_total = 0
@@ -50,6 +58,7 @@ class CANBus:
             self._setup_socketcan()
         
         self._connect()
+        self._start_rx_thread()
     
     def _setup_socketcan(self):
         """Setup SocketCAN with minimal TX queue to prevent buffer buildup"""
@@ -87,6 +96,23 @@ class CANBus:
                 raise ConnectionError(f"Missing pyserial: pip install pyserial")
             raise ConnectionError(f"Failed to connect: {e}")
     
+    def _start_rx_thread(self):
+        """Start background thread to continuously receive messages"""
+        self._rx_running = True
+        self._rx_thread = threading.Thread(target=self._rx_worker, daemon=True)
+        self._rx_thread.start()
+    
+    def _rx_worker(self):
+        """Background thread: continuously receive and buffer messages"""
+        while self._rx_running:
+            try:
+                msg = self.bus.recv(timeout=0.1)
+                if msg:
+                    with self._rx_lock:
+                        self._rx_buffer.append((msg.arbitration_id, list(msg.data)))
+            except Exception:
+                pass  # Ignore errors, keep receiving
+    
     def send(self, can_id: int, data: List[int], extended: bool = False) -> bool:
         """
         Send CAN message reliably (queues if link down, no data loss)
@@ -115,7 +141,7 @@ class CANBus:
         
         try:
             # Ultra-short timeout to avoid blocking
-            self.bus.send(msg, timeout=0.05)
+            self.bus.send(msg, timeout=0.2)
             self._fail_count = 0
             self._sent_total += 1
             return True
@@ -151,35 +177,45 @@ class CANBus:
         return True
     
     def _drain_queue(self):
-        """Send queued messages when link recovers"""
+        """Send queued messages when link recovers (fast drain with small timeout)"""
         if len(self._msg_queue) == 0:
             return
         
-        print(f"[CAN] Draining {len(self._msg_queue)} queued messages...")
+        # Drain ALL queued messages as fast as possible
+        # Use small timeout to avoid blocking but still allow hardware to accept messages
+        initial_count = len(self._msg_queue)
+        
+        if initial_count > 10:
+            print(f"[CAN] Draining {initial_count} queued messages...")
+        
         sent = 0
         failed = False
         
-        while self._msg_queue and sent < 100:  # Limit drain rate
+        # Drain EVERYTHING in the queue at maximum speed
+        while self._msg_queue:
             can_id, data, extended = self._msg_queue[0]
             msg = can.Message(arbitration_id=can_id, data=data, is_extended_id=extended)
             
             try:
-                self.bus.send(msg, timeout=0.05)
+                # Small timeout = fast but won't fail if buffer temporarily full
+                self.bus.send(msg, timeout=0.01)  # 10ms timeout
                 self._msg_queue.popleft()
                 sent += 1
                 self._sent_total += 1
+                    
             except Exception:
                 # Failed during drain - stop immediately
                 failed = True
-                print(f"[CAN] Drain failed - {len(self._msg_queue)} msgs remain in queue")
+                if len(self._msg_queue) > 10:
+                    print(f"[CAN] Drain failed - {len(self._msg_queue)} msgs remain in queue")
                 self._link_ok = False  # Keep link marked as DOWN
                 break
         
         if not failed and len(self._msg_queue) == 0:
-            print(f"[CAN] Queue drained successfully - link UP")
+            print(f"[CAN] Queue drained successfully ({sent} msgs) - link UP")
             self._link_ok = True
             self._fail_count = 0
-        elif not failed:
+        elif not failed and sent > 0:
             print(f"[CAN] Drained {sent} msgs - {len(self._msg_queue)} remain")
 
     
@@ -203,29 +239,28 @@ class CANBus:
     
     def receive(self, timeout: float = 1.0) -> Optional[Tuple[int, List[int]]]:
         """
-        Receive CAN message
+        Receive CAN message from RX buffer
         
         Args:
-            timeout: Timeout in seconds
+            timeout: Timeout in seconds (waits for message in buffer)
             
         Returns:
             (can_id, data) or None if timeout
         """
-        try:
-            msg = self.bus.recv(timeout=timeout)
-            if msg is None:
-                return None
-            return (msg.arbitration_id, list(msg.data))
-        except Exception as e:
-            print(f"[CAN] RX error: {e}")
-            return None
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            with self._rx_lock:
+                if self._rx_buffer:
+                    return self._rx_buffer.popleft()
+            time.sleep(0.01)  # Small sleep to avoid busy-waiting
+        return None
     
     def receive_all(self, timeout: float = 0.01, max_msgs: int = 100) -> List[Tuple[int, List[int]]]:
         """
-        Receive all available messages (bulk read)
+        Receive all available messages (bulk read from RX buffer)
         
         Args:
-            timeout: Timeout for first message
+            timeout: Timeout for first message (not used with buffer)
             max_msgs: Max messages per call
             
         Returns:
@@ -233,33 +268,28 @@ class CANBus:
         """
         messages = []
         
-        try:
-            msg = self.bus.recv(timeout=timeout)
-            if msg:
-                messages.append((msg.arbitration_id, list(msg.data)))
-                
-                # Get remaining buffered messages
-                for _ in range(max_msgs - 1):
-                    msg = self.bus.recv(timeout=0)
-                    if not msg:
-                        break
-                    messages.append((msg.arbitration_id, list(msg.data)))
-        except Exception as e:
-            print(f"[CAN] RX error: {e}")
+        # Read from RX buffer (populated by background thread)
+        with self._rx_lock:
+            # Get up to max_msgs from buffer
+            count = min(len(self._rx_buffer), max_msgs)
+            for _ in range(count):
+                if self._rx_buffer:
+                    messages.append(self._rx_buffer.popleft())
         
         return messages
     
     def send_with_ack(self, can_id: int, data: List[int], ack_id: Optional[int] = None, 
-                      timeout: float = 2.0, max_retries: int = 3, extended: bool = False) -> bool:
+                      timeout: float = 0.5, max_retries: int = 1, extended: bool = False) -> bool:
         """
         Send message and wait for ACK (guarantees delivery to destination)
+        Uses background RX thread for non-blocking ACK reception
         
         Args:
             can_id: CAN ID for data message
             data: Data bytes (0-8 bytes)
             ack_id: Expected ACK CAN ID (default: can_id + 1)
-            timeout: Timeout waiting for ACK in seconds
-            max_retries: Number of retries if no ACK
+            timeout: Timeout waiting for ACK in seconds (default: 0.5)
+            max_retries: Number of retries if no ACK (default: 1)
             extended: Use extended ID format
             
         Returns:
@@ -270,28 +300,34 @@ class CANBus:
         
         for attempt in range(max_retries):
             # Send the message
-            self.send(can_id, data, extended)
+            if not self.send(can_id, data, extended):
+                # Send failed (queue full)
+                return False
             
-            # Wait for ACK
+            # Wait for ACK - check RX buffer instead of blocking on recv()
             start_time = time.time()
             while time.time() - start_time < timeout:
-                result = self.receive(timeout=0.1)
-                if result:
-                    rx_id, rx_data = result
-                    # Check if this is our ACK (ID matches and first byte is 0xFF)
-                    if rx_id == ack_id and len(rx_data) > 0 and rx_data[0] == 0xFF:
-                        return True
+                # Check RX buffer for ACK
+                with self._rx_lock:
+                    for i, (rx_id, rx_data) in enumerate(self._rx_buffer):
+                        # Check if this is our ACK (ID matches and first byte is 0xFF)
+                        if rx_id == ack_id and len(rx_data) > 0 and rx_data[0] == 0xFF:
+                            # Remove ACK from buffer and return success
+                            del self._rx_buffer[i]
+                            return True
+                
+                # Small sleep to avoid busy-waiting
+                time.sleep(0.01)
             
-            # No ACK received, retry
+            # No ACK received
             if attempt < max_retries - 1:
-                print(f"[NO ACK] Retry {attempt + 2}/{max_retries}")
+                time.sleep(0.05)  # Brief pause before retry
         
-        print(f"[ACK FAIL] No ACK after {max_retries} attempts")
         return False
     
     def send_ack(self, original_id: int, original_data: List[int], extended: bool = False) -> bool:
         """
-        Send ACK for received message
+        Send ACK for received message (non-blocking, fire-and-forget)
         
         Args:
             original_id: CAN ID of message being acknowledged
@@ -303,7 +339,15 @@ class CANBus:
         """
         ack_id = original_id + 1
         ack_data = [0xFF, original_data[0] if original_data else 0x00]
-        return self.send(ack_id, ack_data, extended)
+        
+        # Use direct bus.send() with zero timeout for non-blocking ACK
+        msg = can.Message(arbitration_id=ack_id, data=ack_data, is_extended_id=extended)
+        try:
+            self.bus.send(msg, timeout=0)  # Non-blocking
+            return True
+        except:
+            return False  # ACK failed, but don't block
+
     
     def check_link(self) -> bool:
         """
@@ -345,6 +389,11 @@ class CANBus:
     
     def close(self):
         """Close CAN bus and report final statistics"""
+        # Stop RX thread
+        self._rx_running = False
+        if self._rx_thread:
+            self._rx_thread.join(timeout=1.0)
+        
         stats = self.get_stats()
         print(f"[CAN] Closing - Stats: {stats}")
         

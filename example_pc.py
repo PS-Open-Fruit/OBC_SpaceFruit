@@ -22,8 +22,12 @@ def main():
                 
                 # Send ACK for telemetry messages (ID 0x100)
                 if can_id == 0x100:
-                    can.send_ack(can_id, data)
-                    print(f"     ↳ ACK sent (confirms reception)")
+                    # Send ACK without blocking/checking if it succeeds
+                    try:
+                        can.send_ack(can_id, data)
+                        print(f"     ↳ ACK sent")
+                    except:
+                        print(f"     ↳ ACK failed (bus busy)")
             
             time.sleep(0.01)
             

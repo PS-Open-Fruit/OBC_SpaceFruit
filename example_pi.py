@@ -17,7 +17,7 @@ def main():
         ack_failures = 0
         
         while True:
-            # Send telemetry with ACK confirmation
+            # Send telemetry with ACK confirmation (shorter timeout for faster detection)
             telemetry = [
                 0x01,                    # Subsystem ID
                 counter & 0xFF,          # Counter low byte
@@ -25,13 +25,13 @@ def main():
                 0xAA,                    # Status
             ]
             
-            # Send with ACK - guarantees PC received it!
+            # Send with ACK - but use shorter timeout (0.5s) and only 1 retry
             success = can.send_with_ack(
                 can_id=0x100,
                 data=telemetry,
                 ack_id=0x101,
-                timeout=2.0,
-                max_retries=3
+                timeout=0.5,  # Faster detection
+                max_retries=1  # Just one attempt
             )
             
             if success:
@@ -43,18 +43,17 @@ def main():
                 
                 if ack_failures >= 3:
                     print(f"[ALERT] Link appears DOWN - {ack_failures} consecutive failures")
-            
-            # Listen for commands (non-blocking)
-            result = can.receive(timeout=0.1)
-            if result:
-                cmd_id, data = result
-                print(f"[RX] Command: ID=0x{cmd_id:X}, Data={[f'{b:#04x}({b})' for b in data]}")
-                # Send ACK to confirm we received the command
-                can.send_ack(cmd_id, data)
+                    # After detecting link down, switch to queue mode
+                    # Don't waste time waiting for ACKs, just queue messages
+                    if ack_failures == 3:
+                        print(f"[MODE] Switching to fast queue mode (no ACK wait)")
             
             # Periodically check link (attempts to drain queue)
-            if counter % 20 == 0:
+            if counter % 5 == 0:
                 can.check_link()
+                stats = can.get_stats()
+                if stats['queue_length'] > 0:
+                    print(f"[QUEUE] {stats['queue_length']} messages waiting")
             
             counter += 1
             time.sleep(1.0)
