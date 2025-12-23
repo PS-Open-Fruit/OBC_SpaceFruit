@@ -59,6 +59,7 @@ class CANBus:
         
         self._connect()
         self._start_rx_thread()
+        self._start_maintenance_thread()
     
     def _setup_socketcan(self):
         """Setup SocketCAN with minimal TX queue to prevent buffer buildup"""
@@ -116,15 +117,39 @@ class CANBus:
             except Exception:
                 pass  # Ignore errors, keep receiving
     
+    def _start_maintenance_thread(self):
+        """Start background thread for automatic queue draining and link recovery"""
+        maintenance_thread = threading.Thread(target=self._maintenance_worker, daemon=True)
+        maintenance_thread.start()
+    
+    def _maintenance_worker(self):
+        """Background thread: automatically drain queue when link recovers"""
+        while self._rx_running:
+            try:
+                # Every 0.5 seconds, try to drain queue if link is down
+                if not self._link_ok and len(self._msg_queue) > 0:
+                    self._drain_queue()
+                
+                time.sleep(0.5)
+            except Exception:
+                pass  # Keep running even if error occurs
+    
     def send(self, can_id: int, data: List[int], extended: bool = False) -> bool:
         """
-        Send CAN message reliably (queues if link down, no data loss)
-        User doesn't need to handle exceptions - all errors caught internally
+        Send CAN message - just call this and forget about buffering!
+        
+        Library automatically:
+        - Sends immediately if link is up
+        - Queues in RAM if link is down
+        - Drains queue when link recovers (background thread)
+        - Detects link failures automatically
+        
+        User doesn't need to handle exceptions or manage buffers - all errors caught internally
         
         Args:
             can_id: CAN arbitration ID (0x000-0x7FF standard, 0x1FFFFFFF extended)
             data: List of bytes (0-8 bytes)
-            extended: Use extended ID format
+            extended: Use extended ID format (default: False)
             
         Returns:
             True if sent or queued successfully, False only if queue full
@@ -260,13 +285,18 @@ class CANBus:
     
     def receive(self, timeout: float = 1.0) -> Optional[Tuple[int, List[int]]]:
         """
-        Receive CAN message from RX buffer - never throws exceptions
+        Receive one CAN message - just call this and forget about threading!
+        
+        Background thread continuously receives and buffers all messages.
+        You just pull from the buffer whenever you want.
+        
+        Never throws exceptions - returns None on timeout
         
         Args:
             timeout: Timeout in seconds (waits for message in buffer)
             
         Returns:
-            (can_id, data) or None if timeout/error
+            (can_id, data) or None if timeout
         """
         try:
             start_time = time.time()
@@ -282,14 +312,19 @@ class CANBus:
     
     def receive_all(self, timeout: float = 0.01, max_msgs: int = 100) -> List[Tuple[int, List[int]]]:
         """
-        Receive all available messages (bulk read from RX buffer) - never throws exceptions
+        Receive all buffered messages at once - efficient bulk receive!
+        
+        Background thread continuously receives and buffers all messages.
+        You just pull all of them whenever you want.
+        
+        Never throws exceptions - returns empty list if none available
         
         Args:
-            timeout: Timeout for first message (not used with buffer)
-            max_msgs: Max messages per call
+            timeout: Not used (returns immediately with buffered messages)
+            max_msgs: Max messages to return per call
             
         Returns:
-            List of (can_id, data) tuples (empty list on error)
+            List of (can_id, data) tuples (empty list if none available)
         """
         try:
             messages = []
