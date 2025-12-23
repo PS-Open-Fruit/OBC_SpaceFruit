@@ -67,6 +67,7 @@ class FileTransferSender:
             # Step 2: Send file data in chunks
             sequence = 0
             bytes_sent = 0
+            start_time = time.time()
             
             while bytes_sent < file_size:
                 chunk_size = min(5, file_size - bytes_sent)  # 5 bytes data + 3 bytes header (type + seq)
@@ -79,10 +80,15 @@ class FileTransferSender:
                 bytes_sent += chunk_size
                 sequence += 1
                 
-                # Progress (print every 500 chunks to avoid spam)
+                # Progress with speed metrics (every 500 chunks)
                 if sequence % 500 == 0 or bytes_sent == file_size:
+                    elapsed = time.time() - start_time
+                    speed = bytes_sent / elapsed if elapsed > 0 else 0  # bytes per second
                     progress = (bytes_sent / file_size) * 100
-                    print(f"[SENDER] Sent {bytes_sent}/{file_size} bytes ({progress:.1f}%)")
+                    remaining_bytes = file_size - bytes_sent
+                    eta = remaining_bytes / speed if speed > 0 else 0
+                    
+                    print(f"[SENDER] Sent {bytes_sent}/{file_size} bytes ({progress:.1f}%) | Speed: {speed:.1f} B/s | ETA: {eta:.1f}s")
                 
                 # Small pause every 50 messages to let receiver drain buffer
                 if sequence % 50 == 0:
@@ -216,7 +222,7 @@ class FileTransferReceiver:
                 
                 elif msg_type == MSG_TYPE_DATA:
                     if self.state == 'DATA':
-                        if not self._handle_data(data):
+                        if not self._handle_data(data, start_time):
                             return False, "DATA parse error"
                 
                 elif msg_type == MSG_TYPE_END:
@@ -271,7 +277,7 @@ class FileTransferReceiver:
             print(f"[RECEIVER] FILENAME error: {e}")
             return False
     
-    def _handle_data(self, data: List[int]) -> bool:
+    def _handle_data(self, data: List[int], start_time: float = None) -> bool:
         """Handle DATA message"""
         try:
             if len(data) < 3:
@@ -291,7 +297,12 @@ class FileTransferReceiver:
             progress = (len(self.file_data) / self.file_size) * 100 if self.file_size > 0 else 0
             # Print progress every 500 chunks to reduce spam
             if sequence % 500 == 0 or progress >= 99.9:
-                print(f"[RECEIVER] DATA {sequence} - received {len(self.file_data)}/{self.file_size} bytes ({progress:.1f}%)")
+                elapsed = time.time() - start_time if start_time else 0
+                speed = len(self.file_data) / elapsed if elapsed > 0 else 0
+                remaining_bytes = self.file_size - len(self.file_data)
+                eta = remaining_bytes / speed if speed > 0 else 0
+                
+                print(f"[RECEIVER] DATA {sequence} - received {len(self.file_data)}/{self.file_size} bytes ({progress:.1f}%) | Speed: {speed:.1f} B/s | ETA: {eta:.1f}s")
             
             return True
         except Exception as e:
