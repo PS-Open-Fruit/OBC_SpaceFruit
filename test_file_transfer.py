@@ -79,14 +79,14 @@ class FileTransferSender:
                 bytes_sent += chunk_size
                 sequence += 1
                 
-                # Progress (print every 100 chunks to avoid spam)
-                if sequence % 100 == 0 or bytes_sent == file_size:
+                # Progress (print every 500 chunks to avoid spam)
+                if sequence % 500 == 0 or bytes_sent == file_size:
                     progress = (bytes_sent / file_size) * 100
                     print(f"[SENDER] Sent {bytes_sent}/{file_size} bytes ({progress:.1f}%)")
                 
-                # Flow control: pause every 20 messages to avoid buffer overflow
-                if sequence % 20 == 0:
-                    time.sleep(0.02)  # 20ms pause to let receiver catch up
+                # Small pause every 50 messages to let receiver drain buffer
+                if sequence % 50 == 0:
+                    time.sleep(0.01)  # 10ms pause
             
             # Step 3: Send END message with CRC32
             if not self._send_end(crc32):
@@ -114,7 +114,6 @@ class FileTransferSender:
             data.append(len(filename_bytes))
             
             self.can.send(self.can_id, data)  # 6 bytes total (1+4+1), fits in one CAN message
-            time.sleep(0.01)
             
             # Send filename in continuation frames if needed
             for i in range(0, len(filename_bytes), 7):  # 7 bytes per frame (1 byte header + 7 data)
@@ -122,7 +121,6 @@ class FileTransferSender:
                 frame = [MSG_TYPE_FILENAME]
                 frame.extend(chunk)
                 self.can.send(self.can_id, frame)
-                time.sleep(0.01)
             
             print(f"[SENDER] START sent - filename: {filename}, size: {file_size}")
             return True
@@ -137,14 +135,8 @@ class FileTransferSender:
             data.extend(struct.pack('>H', sequence))  # Big-endian 2-byte sequence
             data.extend(chunk)
             
-            # DEBUG: Show first message being sent
-            if sequence == 0:
-                print(f"[SENDER] First DATA message (seq=0):")
-                print(f"  Chunk to send ({len(chunk)} bytes): {' '.join(f'{b:02X}' for b in chunk)}")
-                print(f"  Full CAN data: {' '.join(f'{b:02X}' for b in data[:CAN_MSG_SIZE])}")
-            
             self.can.send(self.can_id, data[:CAN_MSG_SIZE])
-            time.sleep(0.005)  # 5ms delay to prevent buffer overflow
+            time.sleep(0.001)  # 1ms minimum delay to prevent receiver buffer overflow
             
             return True
         except Exception as e:
@@ -293,23 +285,12 @@ class FileTransferReceiver:
             if sequence != self.sequence:
                 print(f"[RECEIVER] Warning: Expected sequence {self.sequence}, got {sequence}")
             
-            # DEBUG: Show first message's raw data
-            if sequence == 0:
-                print(f"[RECEIVER] First DATA message (seq=0):")
-                print(f"  Raw CAN data: {' '.join(f'{b:02X}' for b in data)}")
-                print(f"  Extracted chunk ({len(chunk)} bytes): {' '.join(f'{b:02X}' for b in chunk)}")
-            
             self.file_data.extend(chunk)
             self.sequence = sequence + 1
             
-            # DEBUG: Show first 32 bytes of accumulated data
-            if len(self.file_data) == 32:
-                print(f"[RECEIVER] First 32 bytes accumulated:")
-                print(f"  {' '.join(f'{b:02X}' for b in self.file_data[:32])}")
-            
             progress = (len(self.file_data) / self.file_size) * 100 if self.file_size > 0 else 0
-            # Print progress every 100 chunks to reduce spam
-            if sequence % 100 == 0 or progress >= 99.9:
+            # Print progress every 500 chunks to reduce spam
+            if sequence % 500 == 0 or progress >= 99.9:
                 print(f"[RECEIVER] DATA {sequence} - received {len(self.file_data)}/{self.file_size} bytes ({progress:.1f}%)")
             
             return True
