@@ -21,10 +21,13 @@ from canbus import CANBus
 CAN_MSG_SIZE = 8  # CAN messages are max 8 bytes
 
 # Message Types (first byte of CAN message)
+MSG_TYPE_READY = 0x00      # Ready check: [TYPE]
+MSG_TYPE_READY_ACK = 0x06  # Ready acknowledgement: [TYPE]
 MSG_TYPE_START = 0x01      # File transfer start: [TYPE, TOTAL_SIZE_4bytes, FILENAME_LEN]
 MSG_TYPE_FILENAME = 0x81   # Filename continuation: [TYPE, FILENAME_BYTES...]
 MSG_TYPE_DATA = 0x02       # Data chunk: [TYPE, SEQ_NUM_2bytes, DATA...] (5 bytes max data)
 MSG_TYPE_END = 0x03        # Transfer end: [TYPE, CRC32_4bytes]
+MSG_TYPE_END_ACK = 0x07    # Transfer complete ACK: [TYPE]
 MSG_TYPE_ACK = 0x04        # Acknowledgement: [TYPE, SEQ_NUM_2bytes or 0xFFFF for END]
 MSG_TYPE_ERROR = 0x05      # Error: [TYPE, ERROR_CODE]
 
@@ -58,6 +61,13 @@ class FileTransferSender:
             # Calculate CRC32 checksum
             crc32 = zlib.crc32(file_data) & 0xffffffff
             print(f"[SENDER] CRC32: 0x{crc32:08X}")
+            
+            # Step 0: Check if receiver is ready
+            print(f"[SENDER] Checking if receiver is ready...")
+            if not self._wait_for_receiver_ready(timeout=5.0):
+                print("[SENDER] Receiver not ready - aborting")
+                return False
+            print(f"[SENDER] Receiver is ready!")
             
             # Step 1: Send START message with file info
             if not self._send_start(filename, file_size):
@@ -99,8 +109,14 @@ class FileTransferSender:
                 print("[SENDER] END failed")
                 return False
             
-            print(f"[SENDER] ✓ File transfer complete!")
-            return True
+            # Step 4: Wait for final ACK from receiver
+            print(f"[SENDER] Waiting for receiver to acknowledge...")
+            if self._wait_for_end_ack(timeout=10.0):
+                print(f"[SENDER] ✓ File transfer complete - ACK received!")
+                return True
+            else:
+                print(f"[SENDER] ✗ No ACK received from receiver")
+                return False
             
         except FileNotFoundError:
             print(f"[SENDER] File not found: {filename}")
@@ -161,6 +177,42 @@ class FileTransferSender:
         except Exception as e:
             print(f"[SENDER] END error: {e}")
             return False
+    
+    def _wait_for_receiver_ready(self, timeout: float = 5.0) -> bool:
+        """Wait for receiver to confirm it's ready"""
+        try:
+            # Send READY message
+            self.can.send(self.can_id, [MSG_TYPE_READY])
+            
+            # Wait for READY_ACK
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                result = self.can.receive(timeout=0.1)
+                if result:
+                    can_id, data = result
+                    if can_id == self.ack_id and len(data) > 0 and data[0] == MSG_TYPE_READY_ACK:
+                        return True
+            
+            return False
+        except Exception as e:
+            print(f"[SENDER] READY check error: {e}")
+            return False
+    
+    def _wait_for_end_ack(self, timeout: float = 10.0) -> bool:
+        """Wait for receiver to confirm transfer complete"""
+        try:
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                result = self.can.receive(timeout=0.1)
+                if result:
+                    can_id, data = result
+                    if can_id == self.ack_id and len(data) > 0 and data[0] == MSG_TYPE_END_ACK:
+                        return True
+            
+            return False
+        except Exception as e:
+            print(f"[SENDER] END ACK error: {e}")
+            return False
 
 
 class FileTransferReceiver:
@@ -211,16 +263,21 @@ class FileTransferReceiver:
                 msg_type = data[0]
                 
                 # Parse message based on type
-                if msg_type == MSG_TYPE_START:
+                if msg_type == MSG_TYPE_READY:
+                    if not self._handle_ready():
+                        return False, "READY response failed"
+                
+                elif msg_type == MSG_TYPE_START:
                     if not self._handle_start(data):
                         return False, "START parse error"
                 
                 elif msg_type == MSG_TYPE_FILENAME:
-                    if self.state == 'FILENAME':
-                        if not self._handle_filename(data):
-                            return False, "FILENAME parse error"
+                    # Handle FILENAME regardless of state (in case START was missed)
+                    if not self._handle_filename(data):
+                        return False, "FILENAME parse error"
                 
                 elif msg_type == MSG_TYPE_DATA:
+                    # Only process DATA if we're in DATA state
                     if self.state == 'DATA':
                         if not self._handle_data(data, start_time):
                             return False, "DATA parse error"
@@ -228,6 +285,9 @@ class FileTransferReceiver:
                 elif msg_type == MSG_TYPE_END:
                     if not self._handle_end(data):
                         return False, "END parse error"
+                    # Send ACK back to sender
+                    if not self._send_end_ack():
+                        print("[RECEIVER] Warning: Failed to send final ACK")
                     return True, None
             
             # Check if no messages for 10 seconds (connection lost)
@@ -260,14 +320,30 @@ class FileTransferReceiver:
             print(f"[RECEIVER] START error: {e}")
             return False
     
+    def _handle_ready(self) -> bool:
+        """Handle READY message from sender"""
+        try:
+            print("[RECEIVER] READY message received")
+            # Send back READY_ACK on ack_id so sender can receive it
+            self.can.send(self.ack_id, [MSG_TYPE_READY_ACK])
+            return True
+        except Exception as e:
+            print(f"[RECEIVER] READY handler error: {e}")
+            return False
+    
     def _handle_filename(self, data: List[int]) -> bool:
         """Handle FILENAME continuation message"""
         try:
+            # Initialize if not already done (in case START was missed)
+            if self.state == 'IDLE':
+                self.state = 'FILENAME'
+                self.filename_buffer = bytearray()
+            
             filename_chunk = data[1:]  # Skip type byte
             self.filename_buffer.extend(filename_chunk)
             
             # Check if we have complete filename
-            if len(self.filename_buffer) >= self.expected_filename_len:
+            if self.expected_filename_len > 0 and len(self.filename_buffer) >= self.expected_filename_len:
                 self.filename = self.filename_buffer[:self.expected_filename_len].decode('utf-8')
                 self.state = 'DATA'
                 print(f"[RECEIVER] Filename received: {self.filename}")
@@ -344,6 +420,17 @@ class FileTransferReceiver:
             return True
         except Exception as e:
             print(f"[RECEIVER] Save error: {e}")
+            return False
+    
+    def _send_end_ack(self) -> bool:
+        """Send final ACK after successful transfer"""
+        try:
+            print("[RECEIVER] Sending final ACK...")
+            self.can.send(self.ack_id, [MSG_TYPE_END_ACK])
+            time.sleep(0.1)  # Give sender time to receive it
+            return True
+        except Exception as e:
+            print(f"[RECEIVER] END_ACK error: {e}")
             return False
 
 
