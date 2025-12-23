@@ -12,7 +12,7 @@ import time
 def main():
     # Initialize USB CAN adapter (library handles all errors internally)
     print("Starting PC CAN interface with ACK...")
-    can = CANBus('COM3', bitrate=250000)  # Change COM port as needed
+    can = CANBus('COM6', bitrate=250000)  # Change COM port as needed
     
     # Simple infinite loop - no try/except needed!
     while True:

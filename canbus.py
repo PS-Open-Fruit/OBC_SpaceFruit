@@ -329,6 +329,15 @@ class CANBus:
                 ack_id = can_id + 1
             
             for attempt in range(max_retries):
+                # IMPORTANT: Clear any stale ACKs with matching ID from buffer
+                # This prevents false positives when cable is disconnected
+                with self._rx_lock:
+                    self._rx_buffer = deque(
+                        [(rx_id, rx_data) for rx_id, rx_data in self._rx_buffer 
+                         if not (rx_id == ack_id and len(rx_data) > 0 and rx_data[0] == 0xFF)],
+                        maxlen=self._rx_buffer.maxlen
+                    )
+                
                 # Send the message
                 if not self.send(can_id, data, extended):
                     # Send failed (queue full)
