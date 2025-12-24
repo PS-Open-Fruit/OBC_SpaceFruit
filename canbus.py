@@ -44,7 +44,7 @@ class CANBus:
         self._msg_queue = deque(maxlen=queue_size if queue_size > 0 else None)
         
         # RX buffer for ACKs (accessed by background thread)
-        self._rx_buffer = deque(maxlen=500)  # Larger buffer for bursts
+        self._rx_buffer = deque(maxlen=2000)  # Large buffer for Windows/SLCAN bursts
         self._rx_lock = threading.Lock()
         self._rx_thread = None
         self._rx_running = False

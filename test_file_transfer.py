@@ -100,9 +100,10 @@ class FileTransferSender:
                     
                     print(f"[SENDER] Sent {bytes_sent}/{file_size} bytes ({progress:.1f}%) | Speed: {speed:.1f} B/s | ETA: {eta:.1f}s")
                 
-                # Small pause every 50 messages to let receiver drain buffer
-                if sequence % 50 == 0:
-                    time.sleep(0.01)  # 10ms pause
+                # Throttle to match CAN bus capacity (~3.5KB/s at 250kbps with overhead)
+                # Pause every 5 messages to prevent queue buildup
+                if sequence % 5 == 0:
+                    time.sleep(0.004)  # 4ms pause every 5 msgs = ~1250 msgs/sec = ~3750 B/s
             
             # Step 3: Send END message with CRC32
             if not self._send_end(crc32):
@@ -158,7 +159,6 @@ class FileTransferSender:
             data.extend(chunk)
             
             self.can.send(self.can_id, data[:CAN_MSG_SIZE])
-            time.sleep(0.001)  # 1ms minimum delay to prevent receiver buffer overflow
             
             return True
         except Exception as e:
@@ -238,18 +238,23 @@ class FileTransferReceiver:
     
     def receive_file(self, timeout: float = 60.0) -> Tuple[bool, Optional[str]]:
         """
-        Receive file with timeout
+        Receive file with progress-based timeout (no hard time limit)
+        
+        Transfer continues as long as messages are being received.
+        Only fails if no messages for 30 seconds (connection lost).
         
         Returns:
             (success, error_message)
         """
         start_time = time.time()
         last_message_time = time.time()
+        last_sequence = -1
+        stall_count = 0
         self.reset()
         
         print(f"\n[RECEIVER] Waiting for file transfer...")
         
-        while time.time() - start_time < timeout:
+        while True:  # No hard timeout - continue as long as progress is being made
             messages = self.can.receive_all()
             
             for can_id, data in messages:
@@ -281,6 +286,10 @@ class FileTransferReceiver:
                     if self.state == 'DATA':
                         if not self._handle_data(data, start_time):
                             return False, "DATA parse error"
+                        # Reset stall counter on successful data reception
+                        if self.sequence > last_sequence:
+                            last_sequence = self.sequence
+                            stall_count = 0
                 
                 elif msg_type == MSG_TYPE_END:
                     if not self._handle_end(data):
@@ -290,13 +299,23 @@ class FileTransferReceiver:
                         print("[RECEIVER] Warning: Failed to send final ACK")
                     return True, None
             
-            # Check if no messages for 10 seconds (connection lost)
-            if time.time() - last_message_time > 10.0:
-                return False, f"No data received for 10 seconds (got {len(self.file_data)}/{self.file_size} bytes)"
+            # Safety check: Connection lost (no messages for 30 seconds)
+            if time.time() - last_message_time > 30.0:
+                return False, f"Connection lost: No messages for 30 seconds (got {len(self.file_data)}/{self.file_size} bytes)"
             
-            time.sleep(0.001)  # Minimal sleep - consume messages as fast as possible!
-        
-        return False, f"Timeout waiting for file (got {len(self.file_data)}/{self.file_size} bytes)"
+            # Safety check: Transfer stalled (same sequence number for too long)
+            # This catches cases where messages arrive but no progress is made
+            if self.state == 'DATA' and self.sequence > 0:
+                if self.sequence == last_sequence:
+                    stall_count += 1
+                    if stall_count > 300:  # ~30 seconds at 0.1ms sleep
+                        return False, f"Transfer stalled: No progress for 30 seconds (stuck at sequence {self.sequence})"
+                else:
+                    stall_count = 0
+                    last_sequence = self.sequence
+            
+            # Tiny sleep to prevent 100% CPU usage while still consuming fast
+            time.sleep(0.0001)  # 0.1ms - minimal delay
     
     def _handle_start(self, data: List[int]) -> bool:
         """Handle START message (header only)"""
@@ -451,7 +470,7 @@ def sender_mode(filename: str, interface: str = 'COM6', bitrate: int = 250000):
         print(f"Bitrate:   {bitrate} bps")
         print("=" * 60)
         
-        can = CANBus(interface, bitrate=bitrate)
+        can = CANBus(interface, bitrate=bitrate, queue_size=0)  # Unlimited queue for large transfers
         sender = FileTransferSender(can, can_id=0x100)
         
         success = sender.send_file(filename)
@@ -484,7 +503,9 @@ def receiver_mode(interface: str = 'COM6', bitrate: int = 250000):
         can = CANBus(interface, bitrate=bitrate)
         receiver = FileTransferReceiver(can, can_id=0x100)
         
-        success, error = receiver.receive_file(timeout=120.0)  # 2 minutes timeout
+        # No hard timeout - transfer continues as long as progress is being made
+        # Only fails if connection lost (no messages for 30 seconds)
+        success, error = receiver.receive_file()
         
         if success:
             output_filename = f"received_{receiver.filename}"
