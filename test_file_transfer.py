@@ -463,37 +463,50 @@ class FileTransferReceiver:
 
 
 
-def sender_mode(filename: str, interface: str = 'COM6', bitrate: int = 250000):
+def sender_mode(filename: str, interface: str = 'COM6', bitrate: int = 250000, background: bool = False):
     """Run as SENDER - send file over CAN"""
-    try:
-        if not os.path.exists(filename):
-            print(f"✗ File not found: {filename}")
+    def _sender():
+        try:
+            if not os.path.exists(filename):
+                print(f"✗ File not found: {filename}")
+                return False
+            
+            print("=" * 60)
+            print("CAN FILE TRANSFER - SENDER MODE")
+            print("=" * 60)
+            print(f"File:      {filename}")
+            print(f"Interface: {interface}")
+            print(f"Bitrate:   {bitrate} bps")
+            print("=" * 60)
+            
+            can = CANBus(interface, bitrate=bitrate, queue_size=0)  # Unlimited queue for large transfers
+            sender = FileTransferSender(can, can_id=0x100)
+            
+            success = sender.send_file(filename)
+            
+            print("\n[SENDER] Waiting for receiver to acknowledge...")
+            time.sleep(3)
+            
+            can.close()
+            return success
+            
+        except Exception as e:
+            print(f"✗ Sender error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-        
-        print("=" * 60)
-        print("CAN FILE TRANSFER - SENDER MODE")
-        print("=" * 60)
-        print(f"File:      {filename}")
-        print(f"Interface: {interface}")
-        print(f"Bitrate:   {bitrate} bps")
-        print("=" * 60)
-        
-        can = CANBus(interface, bitrate=bitrate, queue_size=0)  # Unlimited queue for large transfers
-        sender = FileTransferSender(can, can_id=0x100)
-        
-        success = sender.send_file(filename)
-        
-        print("\n[SENDER] Waiting for receiver to acknowledge...")
-        time.sleep(3)
-        
-        can.close()
-        return success
-        
-    except Exception as e:
-        print(f"✗ Sender error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    
+    if background:
+        # Run in background thread so shell remains responsive
+        import threading
+        thread = threading.Thread(target=_sender, daemon=False)
+        thread.start()
+        print(f"[SENDER] Started transfer in background (thread: {thread.name})")
+        print(f"[SENDER] You can now run other commands while transfer continues")
+        return True
+    else:
+        # Run synchronously (blocking)
+        return _sender()
 
 
 def receiver_mode(interface: str = 'COM6', bitrate: int = 250000):
@@ -515,17 +528,25 @@ def receiver_mode(interface: str = 'COM6', bitrate: int = 250000):
         # Only fails if connection lost (no messages for 30 seconds)
         success, error = receiver.receive_file()
         
-        if success:
+        # Save file regardless of CRC success (for debugging)
+        if receiver.filename and len(receiver.file_data) > 0:
             output_filename = f"received_{receiver.filename}"
             receiver.save_file(output_filename)
             
             with open(output_filename, 'rb') as f:
                 received_size = len(f.read())
             
-            print(f"\n✓ FILE TRANSFER SUCCESSFUL!")
-            print(f"  Filename:  {receiver.filename}")
-            print(f"  Size:      {received_size} bytes")
-            print(f"  Saved to:  {output_filename}")
+            if success:
+                print(f"\n✓ FILE TRANSFER SUCCESSFUL!")
+                print(f"  Filename:  {receiver.filename}")
+                print(f"  Size:      {received_size} bytes")
+                print(f"  Saved to:  {output_filename}")
+            else:
+                print(f"\n⚠️  FILE SAVED FOR DEBUGGING (despite {error})")
+                print(f"  Filename:  {receiver.filename}")
+                print(f"  Size:      {received_size} bytes (expected {receiver.file_size})")
+                print(f"  Saved to:  {output_filename}")
+                print(f"  Error:     {error}")
         else:
             print(f"\n✗ Receiver failed: {error}")
         
@@ -549,11 +570,12 @@ if __name__ == '__main__':
         print("CAN FILE TRANSFER TEST")
         print("=" * 60)
         print("\nUsage:")
-        print("  SENDER:   python test_file_transfer.py send <filename> [interface] [bitrate]")
+        print("  SENDER:   python test_file_transfer.py send <filename> [interface] [bitrate] [--bg]")
         print("  RECEIVER: python test_file_transfer.py recv [interface] [bitrate]")
         print("\nExamples:")
-        print("  python test_file_transfer.py send myfile.bin COM6 250000")
-        print("  python test_file_transfer.py recv COM6 250000")
+        print("  python test_file_transfer.py send myfile.bin can0 250000       # Foreground")
+        print("  python test_file_transfer.py send myfile.bin can0 250000 --bg  # Background (can run btop)")
+        print("  python test_file_transfer.py recv can0 250000")
         print("\nDefault: interface=COM6, bitrate=250000")
         sys.exit(1)
     
@@ -561,14 +583,15 @@ if __name__ == '__main__':
     
     if mode == 'send':
         if len(sys.argv) < 3:
-            print("✗ Usage: python test_file_transfer.py send <filename> [interface] [bitrate]")
+            print("✗ Usage: python test_file_transfer.py send <filename> [interface] [bitrate] [--bg]")
             sys.exit(1)
         
         filename = sys.argv[2]
         interface = sys.argv[3] if len(sys.argv) > 3 else 'COM6'
         bitrate = int(sys.argv[4]) if len(sys.argv) > 4 else 250000
+        background = '--bg' in sys.argv
         
-        sender_mode(filename, interface, bitrate)
+        sender_mode(filename, interface, bitrate, background=background)
     
     elif mode == 'recv' or mode == 'receive':
         interface = sys.argv[2] if len(sys.argv) > 2 else 'COM6'
