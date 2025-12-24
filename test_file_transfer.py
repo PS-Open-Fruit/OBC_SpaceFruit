@@ -25,7 +25,7 @@ MSG_TYPE_READY = 0x00      # Ready check: [TYPE]
 MSG_TYPE_READY_ACK = 0x06  # Ready acknowledgement: [TYPE]
 MSG_TYPE_START = 0x01      # File transfer start: [TYPE, TOTAL_SIZE_4bytes, FILENAME_LEN]
 MSG_TYPE_FILENAME = 0x81   # Filename continuation: [TYPE, FILENAME_BYTES...]
-MSG_TYPE_DATA = 0x02       # Data chunk: [TYPE, SEQ_NUM_2bytes, DATA...] (5 bytes max data)
+MSG_TYPE_DATA = 0x02       # Data chunk: [TYPE, SEQ_NUM_4bytes, DATA...] (3 bytes max data)
 MSG_TYPE_END = 0x03        # Transfer end: [TYPE, CRC32_4bytes]
 MSG_TYPE_END_ACK = 0x07    # Transfer complete ACK: [TYPE]
 MSG_TYPE_ACK = 0x04        # Acknowledgement: [TYPE, SEQ_NUM_2bytes or 0xFFFF for END]
@@ -80,7 +80,7 @@ class FileTransferSender:
             start_time = time.time()
             
             while bytes_sent < file_size:
-                chunk_size = min(5, file_size - bytes_sent)  # 5 bytes data + 3 bytes header (type + seq)
+                chunk_size = min(3, file_size - bytes_sent)  # 3 bytes data + 5 bytes header (type + seq)
                 chunk = file_data[bytes_sent:bytes_sent + chunk_size]
                 
                 if not self._send_data_chunk(sequence, chunk):
@@ -154,7 +154,7 @@ class FileTransferSender:
         """Send DATA chunk with sequence number"""
         try:
             data = [MSG_TYPE_DATA]
-            data.extend(struct.pack('>H', sequence))  # Big-endian 2-byte sequence
+            data.extend(struct.pack('>I', sequence))  # Big-endian 4-byte sequence
             data.extend(chunk)
             
             self.can.send(self.can_id, data[:CAN_MSG_SIZE])
@@ -356,12 +356,12 @@ class FileTransferReceiver:
     def _handle_data(self, data: List[int], start_time: float = None) -> bool:
         """Handle DATA message"""
         try:
-            if len(data) < 3:
+            if len(data) < 5:
                 print("[RECEIVER] DATA message too short")
                 return False
             
-            sequence = struct.unpack('>H', bytes(data[1:3]))[0]
-            chunk = data[3:]
+            sequence = struct.unpack('>I', bytes(data[1:5]))[0]
+            chunk = data[5:]
             
             # Check sequence (warning only, don't fail)
             if sequence != self.sequence:
