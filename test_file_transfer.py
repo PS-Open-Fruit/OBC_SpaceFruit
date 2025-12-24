@@ -255,7 +255,7 @@ class FileTransferReceiver:
         print(f"\n[RECEIVER] Waiting for file transfer...")
         
         while True:  # No hard timeout - continue as long as progress is being made
-            messages = self.can.receive_all()
+            messages = self.can.receive_all(max_msgs=1000)  # Pull up to 1000 messages at once to prevent buffer overflow
             
             for can_id, data in messages:
                 if can_id != self.can_id:

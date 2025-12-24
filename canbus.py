@@ -310,7 +310,7 @@ class CANBus:
             print(f"[CAN] Receive error: {e}")
             return None
     
-    def receive_all(self, timeout: float = 0.01, max_msgs: int = 100) -> List[Tuple[int, List[int]]]:
+    def receive_all(self, timeout: float = 0.01, max_msgs: int = 1000) -> List[Tuple[int, List[int]]]:
         """
         Receive all buffered messages at once - efficient bulk receive!
         
@@ -321,7 +321,7 @@ class CANBus:
         
         Args:
             timeout: Not used (returns immediately with buffered messages)
-            max_msgs: Max messages to return per call
+            max_msgs: Max messages to return per call (increased to 1000 to prevent buffer overflow)
             
         Returns:
             List of (can_id, data) tuples (empty list if none available)
