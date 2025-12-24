@@ -293,8 +293,12 @@ class FileTransferReceiver:
                 
                 elif msg_type == MSG_TYPE_END:
                     if not self._handle_end(data):
+                        # CRC mismatch or parse error - send ACK anyway so sender stops waiting
+                        print("[RECEIVER] Sending ACK despite error (sender needs to know)")
+                        if not self._send_end_ack():
+                            print("[RECEIVER] Warning: Failed to send final ACK")
                         return False, "END parse error"
-                    # Send ACK back to sender
+                    # Send ACK back to sender on success
                     if not self._send_end_ack():
                         print("[RECEIVER] Warning: Failed to send final ACK")
                     return True, None
@@ -384,7 +388,11 @@ class FileTransferReceiver:
             
             # Check sequence (warning only, don't fail)
             if sequence != self.sequence:
-                print(f"[RECEIVER] Warning: Expected sequence {self.sequence}, got {sequence}")
+                gap = sequence - self.sequence
+                if gap > 1:
+                    print(f"[RECEIVER] ⚠️  MISSING {gap} messages! Expected sequence {self.sequence}, got {sequence}")
+                else:
+                    print(f"[RECEIVER] Warning: Expected sequence {self.sequence}, got {sequence}")
             
             self.file_data.extend(chunk)
             self.sequence = sequence + 1
