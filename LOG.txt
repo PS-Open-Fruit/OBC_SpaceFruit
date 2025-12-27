@@ -1,0 +1,299 @@
+Pi:
+Starting Pi CAN interface with ACK confirmation...
+[CAN] Connected to can0 @ 250000 bps
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x00(0)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x01(1)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x02(2)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x03(3)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x04(4)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x05(5)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x06(6)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x07(7)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x08(8)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x09(9)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x0a(10)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x0b(11)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x0c(12)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x0d(13)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x0e(14)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 3 consecutive failures
+[MODE] Switching to fast queue mode (no ACK wait)
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x0f(15)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 4 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x10(16)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 5 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x11(17)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 6 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x12(18)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 7 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x13(19)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 8 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x14(20)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 9 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x15(21)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 10 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x16(22)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 11 consecutive failures
+[CAN] Queued: 1 msgs
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x17(23)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 12 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x18(24)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 13 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x19(25)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 14 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x1a(26)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 15 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x1b(27)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 16 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x1c(28)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 17 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x1d(29)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 18 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x1e(30)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 19 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x1f(31)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 20 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x20(32)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 21 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x21(33)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 22 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x22(34)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 23 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x23(35)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 24 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x24(36)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 25 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x25(37)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 26 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x26(38)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 27 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x27(39)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 28 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x28(40)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 29 consecutive failures
+[CAN] Draining 18 queued messages...
+[CAN] Drain failed - 18 msgs remain in queue
+[QUEUE] 18 messages waiting
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x29(41)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x2a(42)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x2b(43)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x2c(44)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x2d(45)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x2e(46)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x2f(47)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x30(48)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x31(49)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x32(50)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x33(51)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x34(52)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x35(53)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x36(54)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x37(55)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 3 consecutive failures
+[MODE] Switching to fast queue mode (no ACK wait)
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x38(56)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 4 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x39(57)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 5 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x3a(58)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 6 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x3b(59)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 7 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x3c(60)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 8 consecutive failures
+[CAN] Draining 38 queued messages...
+[CAN] Drain failed - 23 msgs remain in queue
+[QUEUE] 23 messages waiting
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x3d(61)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x3e(62)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x3f(63)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x40(64)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x41(65)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x42(66)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x43(67)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x44(68)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x45(69)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x46(70)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x47(71)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x48(72)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x49(73)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x4a(74)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x4b(75)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x4c(76)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x4d(77)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x4e(78)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 3 consecutive failures
+[MODE] Switching to fast queue mode (no ACK wait)
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x4f(79)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 4 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x50(80)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 5 consecutive failures
+[CAN] Draining 43 queued messages...
+[CAN] Drain failed - 31 msgs remain in queue
+[QUEUE] 31 messages waiting
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x51(81)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x52(82)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x53(83)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x54(84)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x55(85)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x56(86)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x57(87)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x58(88)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x59(89)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x5a(90)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x5b(91)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x5c(92)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x5d(93)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x5e(94)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x5f(95)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 3 consecutive failures
+[MODE] Switching to fast queue mode (no ACK wait)
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x60(96)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 4 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x61(97)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 5 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x62(98)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 6 consecutive failures
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x63(99)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 7 consecutive failures
+[CAN] Queued: 51 msgs
+[TX FAIL] ID=0x100, Data=['0x01(1)', '0x64(100)', '0x00(0)', '0xaa(170)'] - NOT RECEIVED!
+[ALERT] Link appears DOWN - 8 consecutive failures
+[CAN] Draining 51 queued messages...
+[CAN] Drain failed - 39 msgs remain in queue
+[QUEUE] 39 messages waiting
+[TX+ACK] ID=0x100, Data=['0x01(1)', '0x65(101)', '0x00(0)', '0xaa(170)'] - CONFIRMED!
+^C
+Shutting down...
+[CAN] Closing - Stats: {'link_up': False, 'queue_length': 40, 'queue_max': 1000, 'total_sent': 62, 'total_queued': 79, 'total_dropped': 0}
+
+
+
+
+PC:
+Starting PC CAN interface with ACK...
+[CAN] Connected to COM3 @ 250000 bps
+[RX] ID=0x100, Data=['0x01(1)', '0x00(0)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x01(1)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x02(2)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x03(3)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x04(4)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x05(5)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x06(6)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x07(7)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x08(8)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x09(9)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x0a(10)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x0b(11)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x0c(12)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x0d(13)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x0e(14)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x0f(15)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x10(16)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x11(17)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x12(18)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x13(19)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x14(20)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x15(21)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x16(22)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x17(23)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x18(24)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x19(25)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x1a(26)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x1b(27)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x1c(28)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x1d(29)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x1e(30)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x1f(31)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x20(32)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x21(33)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x22(34)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x23(35)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x24(36)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x25(37)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x26(38)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x27(39)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x28(40)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x29(41)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x2a(42)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x2b(43)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x2c(44)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x2d(45)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x2e(46)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x2f(47)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x30(48)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x31(49)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x32(50)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x33(51)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x34(52)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x35(53)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x36(54)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x37(55)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x38(56)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x39(57)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x3a(58)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x3b(59)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x3c(60)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
+[RX] ID=0x100, Data=['0x01(1)', '0x3d(61)', '0x00(0)', '0xaa(170)']
+     ↳ ACK sent
