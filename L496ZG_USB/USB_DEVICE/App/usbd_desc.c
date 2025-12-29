@@ -64,7 +64,7 @@
 
 #define USBD_VID     65535
 #define USBD_LANGID_STRING     1033
-#define USBD_MANUFACTURER_STRING     "OpenFruit Aerospace"
+#define USBD_MANUFACTURER_STRING     "OpenFruit Aerospace."
 #define USBD_PID_FS     65535
 #define USBD_PRODUCT_STRING_FS     "StarFruit"
 #define USBD_CONFIGURATION_STRING_FS     "CDC Config"
