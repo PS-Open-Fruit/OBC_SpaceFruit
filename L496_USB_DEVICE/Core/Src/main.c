@@ -19,10 +19,9 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_device.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,7 +43,8 @@
 UART_HandleTypeDef hlpuart1;
 
 /* USER CODE BEGIN PV */
-
+uint8_t myRxData[128];
+uint8_t myTxData[] = "This is a very long string that is definitely longer than sixty-four bytes to test the USB CDC transmission capabilities of the STM32 microcontroller.\n";
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,7 +99,19 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  
+	   if (VCP_Available() > 0)
+       {
+           // 2. อ่านข้อมูลทั้งหมดที่มีออกมา (สมมติว่าอ่านทีละไม่เกิน 128 bytes)
+           uint32_t bytesRead = VCP_Read(myRxData, 128);
+
+           // 3. ส่งข้อมูลกลับไป (Echo) หรือประมวลผล
+           // ฟังก์ชัน VCP_Write จะจัดการเรื่องรอให้ USB ว่างก่อนส่ง
+           VCP_Write(myRxData, bytesRead);
+       }
+//    HAL_Delay(1000);
+//    VCP_Write(myTxData, sizeof(myTxData));
+    HAL_Delay(1000);
+    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

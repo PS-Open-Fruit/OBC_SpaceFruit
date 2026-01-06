@@ -49,7 +49,11 @@
   */
 
 /* USER CODE BEGIN PRIVATE_TYPES */
+#define RX_BUFFER_SIZE  2048 
 
+uint8_t RxBuffer[RX_BUFFER_SIZE]; // Ring Buffer สำหรับเก็บข้อมูลขาเข้า
+uint32_t RxHead = 0;              // ตำแหน่งเขียน (Write Index)
+uint32_t RxTail = 0;              // ตำแหน่งอ่าน (Read Index)
 /* USER CODE END PRIVATE_TYPES */
 
 /**
@@ -261,6 +265,11 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
+  for (uint32_t i = 0; i < *Len; i++)
+  {
+      RxBuffer[RxHead] = Buf[i];
+      RxHead = (RxHead + 1) % RX_BUFFER_SIZE; // วนกลับไปที่ 0 เมื่อเต็ม
+  }
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);
@@ -316,7 +325,61 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+uint32_t VCP_Available(void)
+{
+    if (RxHead >= RxTail)
+    {
+        // กรณีปกติ: หัวอยู่หน้าหาง
+        return RxHead - RxTail;
+    }
+    else
+    {
+        // กรณีวนรอบ (Wrap Around): หัววนกลับมาเริ่มต้นใหม่ แต่หางยังอยู่ข้างหลัง
+        // ต้องเอา (พื้นที่ที่เหลือถึงปลายอาเรย์) + (พื้นที่จากจุดเริ่มต้นถึงหัว)
+        return RX_BUFFER_SIZE + RxHead - RxTail;
+    }
+}
 
+uint32_t VCP_Read(uint8_t* Buf, uint32_t Len)
+{
+    uint32_t count = 0;
+
+    // เงื่อนไข: ทำไปเรื่อยๆ ถ้า (ยังมีข้อมูลเหลืออยู่) และ (ยังหยิบไม่ครบจำนวนที่ขอ)
+    while ((RxHead != RxTail) && (count < Len))
+    {
+        // 1. หยิบข้อมูลจากตำแหน่งหาง (Tail) ไปใส่ใน Buf ของเรา
+        Buf[count] = RxBuffer[RxTail];
+        
+        // 2. ขยับหางไปช่องถัดไป (เพื่อเตรียมหยิบตัวต่อไปในครั้งหน้า)
+        RxTail = (RxTail + 1) % RX_BUFFER_SIZE; // % เพื่อให้วนกลับเป็นวงกลม
+        
+        // 3. นับจำนวนว่าหยิบมาได้กี่ตัวแล้ว
+        count++;
+    }
+    // ส่งคืนค่าบอกว่า "สรุปหยิบมาได้จริงกี่ตัว" (อาจน้อยกว่า Len ถ้าข้อมูลหมดก่อน)
+    return count;
+}
+
+uint8_t VCP_Write(uint8_t* Buf, uint16_t Len)
+{
+    USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+    
+    // ตั้งเวลา Timeout ป้องกันโปรแกรมค้าง ถ้า USB มีปัญหา
+    uint32_t timeout = 100000;
+    
+    // ลูปนี้คือการ "รอคิว"
+    // ตราบใดที่ TxState ไม่เท่ากับ 0 (แปลว่า USB กำลังยุ่งส่งของเก่าอยู่) 
+    // ให้วนรอไปเรื่อยๆ จนกว่าจะว่าง หรือหมดเวลา (Timeout)
+    while (hcdc->TxState != 0 && timeout > 0) 
+    {
+        timeout--;
+    }
+    
+    if (timeout == 0) return USBD_BUSY; // ถ้าหมดเวลาแล้วยังไม่ว่าง ก็ยอมแพ้ แจ้ง error
+
+    // ถ้าว่างแล้ว ก็สั่งส่งข้อมูลชุดใหม่ได้เลย
+    return CDC_Transmit_FS(Buf, Len);
+}
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 
 /**
