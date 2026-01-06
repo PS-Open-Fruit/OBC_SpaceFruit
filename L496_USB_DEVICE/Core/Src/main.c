@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2025 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -18,9 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usb_host.h"
-#include "usbh_def.h"
-#include "usbh_core.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -46,19 +44,13 @@
 UART_HandleTypeDef hlpuart1;
 
 /* USER CODE BEGIN PV */
-extern USBH_HandleTypeDef hUsbHostFS;
-extern ApplicationTypeDef Appli_state;
 
-uint8_t tx_buffer[] = "Hello STM32 Host\r\n";
-uint8_t rx_buffer[64] ;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
-void MX_USB_HOST_Process(void);
-
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -74,7 +66,7 @@ void MX_USB_HOST_Process(void);
   */
 int main(void)
 {
-
+	
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -98,7 +90,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_LPUART1_UART_Init();
-  MX_USB_HOST_Init();
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -107,18 +99,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  
     /* USER CODE END WHILE */
-    MX_USB_HOST_Process();
-
-    if (Appli_state == APPLICATION_READY)
-        {
-    		HAL_Delay(1500);
-    		USBH_StatusTypeDef status = USBH_CDC_Transmit(&hUsbHostFS, tx_buffer, sizeof(tx_buffer) - 1);
-    		if (status == USBH_OK)
-    		            {
-                       HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
-    		            }
-        }
 
     /* USER CODE BEGIN 3 */
   }
@@ -201,8 +183,8 @@ static void MX_LPUART1_UART_Init(void)
 
   /* USER CODE END LPUART1_Init 1 */
   hlpuart1.Instance = LPUART1;
-  hlpuart1.Init.BaudRate = 115200;
-  hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
+  hlpuart1.Init.BaudRate = 209700;
+  hlpuart1.Init.WordLength = UART_WORDLENGTH_7B;
   hlpuart1.Init.StopBits = UART_STOPBITS_1;
   hlpuart1.Init.Parity = UART_PARITY_NONE;
   hlpuart1.Init.Mode = UART_MODE_TX_RX;
