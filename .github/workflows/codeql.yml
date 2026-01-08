@@ -23,17 +23,13 @@ jobs:
 
       - name: Run Cppcheck (MISRA Only)
         run: |
-          # 1. Create misra.json config to suppress the need for copyright rule texts
+          # 1. Create misra.json config
           echo '{
               "script": "misra.py",
               "args": ["--rule-texts="]
           }' > misra.json
 
           # 2. Run Scan
-          # --output-file: Writes the XML directly to a file (cleaner than using 2>)
-          # --addon=misra.json: Enables MISRA checks
-          # We check Core/Src (User code) and Drivers (HAL)
-          
           cppcheck --addon=misra.json \
                    --inline-suppr \
                    --suppress=missingIncludeSystem \
@@ -43,14 +39,13 @@ jobs:
                    OBC_STM32/Core
 
       - name: Convert to SARIF
-        # FIXED: Using a currently active converter action
         uses: Flast/cppcheck-sarif@v2
         with:
           input: cppcheck_report.xml
           output: cppcheck_report.sarif
 
       - name: Upload Result to GitHub Security Tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: cppcheck_report.sarif
           category: cppcheck
