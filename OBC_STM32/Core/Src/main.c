@@ -54,6 +54,29 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void TEST_FAILURES(void)
+{
+    // [ERROR] Array Index Out of Bounds
+    // Cppcheck will scream about this.
+    char buffer[5];
+    buffer[10] = 0;
+
+    // [MISRA Rule 15.1] Goto statement
+    goto my_label;
+
+    // [ERROR] Uninitialized Variable
+    int x;
+    if (x == 100) {
+        x++;
+    }
+
+    my_label:
+    // [MISRA Rule 2.1] Unreachable code (because of the goto above, code might look weird)
+    // [ERROR] Division by zero
+    int zero = 0;
+    int result = 50 / zero;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -85,6 +108,8 @@ int main(void)
 
   /* Initialize all configured peripherals */
   /* USER CODE BEGIN 2 */
+
+  TEST_FAILURES();
 
   // VIOLATION 1: Rule 11.4 - Conversion between a pointer and an integer type
   // MISRA forbids casting raw numbers directly to pointers without specific safeguards.
