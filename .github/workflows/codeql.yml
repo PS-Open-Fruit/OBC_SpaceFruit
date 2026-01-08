@@ -8,7 +8,7 @@ on:
 jobs:
   misra-analysis:
     name: MISRA C Analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       security-events: write
       actions: read
@@ -19,7 +19,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Cppcheck
-        run: sudo apt-get update && sudo apt-get install -y cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+          cppcheck --version
 
       - name: Run Cppcheck (MISRA Only)
         run: |
@@ -30,12 +33,16 @@ jobs:
           }' > misra.json
 
           # 2. Run Scan
+          # -I: Points to your Include folder so Cppcheck finds main.h
+          # --suppress: We ignore the HAL drivers to focus on your bugs
+          
           cppcheck --addon=misra.json \
                    --inline-suppr \
                    --suppress=missingIncludeSystem \
                    --force \
                    --xml --xml-version=2 \
                    --output-file=cppcheck_report.xml \
+                   -I OBC_STM32/Core/Inc \
                    OBC_STM32/Core
 
       - name: Convert to SARIF
