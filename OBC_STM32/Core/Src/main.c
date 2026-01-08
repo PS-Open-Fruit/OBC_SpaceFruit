@@ -86,6 +86,24 @@ int main(void)
   /* Initialize all configured peripherals */
   /* USER CODE BEGIN 2 */
 
+  // VIOLATION 1: Rule 11.4 - Conversion between a pointer and an integer type
+  // MISRA forbids casting raw numbers directly to pointers without specific safeguards.
+  // This simulates a hardcoded register address access, which is dangerous if unmanaged.
+  int *my_dangerous_pointer = (int *)0x20000000;
+
+  // VIOLATION 2: Rule 15.1 - The 'goto' statement should not be used
+  // This is the most famous rule. "goto" makes code flow hard to follow (spaghetti code).
+  int counter = 0;
+  if (counter == 0)
+  {
+    goto jump_point;
+  }
+
+  counter = 10;
+
+  jump_point:
+  counter++;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
