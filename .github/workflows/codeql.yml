@@ -40,7 +40,7 @@ jobs:
                    --force \
                    --xml --xml-version=2 \
                    --output-file=cppcheck_report.xml \
-                   OBC_STM32/Core OBC_STM32/Drivers/
+                   OBC_STM32/Core
 
       - name: Convert to SARIF
         # FIXED: Using a currently active converter action
