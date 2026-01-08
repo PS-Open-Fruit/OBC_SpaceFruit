@@ -106,20 +106,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	   if (VCP_Available() > 0)
-       {
-           // 2. อ่านข้อมูลทั้งหมดที่มีออกมา (สมมติว่าอ่านทีละไม่เกิน 128 bytes)
-           uint32_t bytesRead = VCP_Read(myRxData, 128);
-
-           HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
-           printf("%s\r\n", myRxData);
-
-           // 3. ส่งข้อมูลกลับไป (Echo) หรือประมวลผล
-           // ฟังก์ชัน VCP_Write จะจัดการเรื่องรอให้ USB ว่างก่อนส่ง
-           VCP_Write(myRxData, bytesRead);
-       }
+//	   if (VCP_Available() > 0)
+//       {
+//           // 2. อ่านข้อมูลทั้งหมดที่มีออกมา (สมมติว่าอ่านทีละไม่เกิน 128 bytes)
+//           uint32_t bytesRead = VCP_Read(myRxData, 128);
+//
+//           HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+//           printf("%s\r\n", myRxData);
+//
+//           // 3. ส่งข้อมูลกลับไป (Echo) หรือประมวลผล
+//           // ฟังก์ชัน VCP_Write จะจัดการเรื่องรอให้ USB ว่างก่อนส่ง
+//           VCP_Write(myRxData, bytesRead);
+//       }
 //    HAL_Delay(1000);
-//    VCP_Write(myTxData, sizeof(myTxData));
+	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+    VCP_Write(myTxData, sizeof(myTxData));
+    printf("send USB CDC from STM32, raspi will be receive \r\n");
     HAL_Delay(1000);
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
     /* USER CODE END WHILE */
