@@ -13,30 +13,39 @@ jobs:
       security-events: write
       actions: read
       contents: read
+    
+    # 1. Run inside a Docker container to get the absolute latest Cppcheck
+    container:
+      image: neszt/cppcheck:latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Cppcheck
-        run: sudo apt-get update && sudo apt-get install -y cppcheck
-
-      - name: Run Cppcheck (MISRA Only)
+      - name: Run Cppcheck (With Includes)
         run: |
-          # 1. Create misra.json config
+          # Configure MISRA
           echo '{
               "script": "misra.py",
               "args": ["--rule-texts="]
           }' > misra.json
 
-          # 2. Run Scan
+          # Run Scan
+          # -I OBC_STM32/Core/Inc : TELLS CPPCHECK WHERE main.h IS
+          # --suppress=*:*Drivers/* : Ignores the HAL drivers (focus on YOUR code)
+          
           cppcheck --addon=misra.json \
                    --inline-suppr \
                    --suppress=missingIncludeSystem \
                    --force \
                    --xml --xml-version=2 \
                    --output-file=cppcheck_report.xml \
+                   -I OBC_STM32/Core/Inc \
                    OBC_STM32/Core
+
+      # 2. Install Node.js (Required for the converter action below)
+      - name: Install Node.js
+        run: apk add --no-cache nodejs npm
 
       - name: Convert to SARIF
         uses: Flast/cppcheck-sarif@v2
