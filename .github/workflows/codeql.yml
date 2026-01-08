@@ -40,7 +40,7 @@ jobs:
                    --force \
                    --xml --xml-version=2 \
                    --output-file=cppcheck_report.xml \
-                   Core/Src Drivers/STM32L4xx_HAL_Driver/Src
+                   OBC_STM32/Core OBC_STM32/Drivers/
 
       - name: Convert to SARIF
         # FIXED: Using a currently active converter action
