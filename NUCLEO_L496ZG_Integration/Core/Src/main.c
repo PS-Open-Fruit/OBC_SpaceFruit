@@ -103,7 +103,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
-	  printf("Test2\n");
+//	  printf("Test2\n");
 	  HAL_Delay(1000);
   }
   /* USER CODE END 3 */
