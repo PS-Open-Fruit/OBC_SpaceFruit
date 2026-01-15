@@ -109,9 +109,19 @@ extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
 uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 
 /* USER CODE BEGIN EXPORTED_FUNCTIONS */
+/* USER CODE BEGIN EXPORTED_FUNCTIONS */
 uint32_t VCP_Read(uint8_t* Buf, uint32_t Len);
 uint32_t VCP_Available(void);
 uint8_t VCP_Write(uint8_t* Buf, uint16_t Len);
+
+/* Global Double Buffers for Main */
+extern uint8_t UserRxBufferA[64];
+extern uint8_t UserRxBufferB[64];
+extern volatile uint8_t BufferA_Ready;
+extern volatile uint8_t BufferB_Ready;
+
+/* Call this from Main after clearing a buffer to resume USB reception if it was paused */
+void CDC_Resume_Reception(void);
 /* USER CODE END EXPORTED_FUNCTIONS */
 
 /**
