@@ -1,0 +1,1 @@
+openocd -f interface/stlink.cfg -f target/stm32l4x.cfg -c "program build/*.elf verify reset exit"
