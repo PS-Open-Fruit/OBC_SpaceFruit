@@ -1,0 +1,3 @@
+[submodule "obc-drivers"]
+	path = obc-drivers
+	url = git@github.com:PS-Open-Fruit/obc-drivers.git
