@@ -1,0 +1,1 @@
+make && openocd -f interface/stlink.cfg -f target/stm32l4x.cfg -c "program build/hardware-test.elf verify reset exit"
