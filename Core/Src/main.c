@@ -22,7 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "mt25ql.h"
+#include "rv3028c7.h"
+#include "tmp1075.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -80,9 +82,9 @@ static void MX_I2C4_Init(void);
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
 
@@ -120,54 +122,114 @@ int main(void)
   MX_I2C4_Init();
   /* USER CODE BEGIN 2 */
   HAL_CAN_Start(&hcan2);
+
+  
+  gpio_t cs_flash = {
+    .GPIOx = NOR_CS_GPIO_Port,
+    .Pin = NOR_CS_Pin
+  };
+
+  gpio_t rst_flash = {
+    .GPIOx = NOR_RST_GPIO_Port,
+    .Pin = NOR_RST_Pin,
+  };
+
+  mt25q_t flash = {
+    .flash_spi.hspi = &hspi2,
+    .flash_spi.cs_pin = cs_flash,
+    .rst_pin = rst_flash,
+  };
+
+  tmp1075_t temp_sen = {
+    .tmp1075_i2c_hal.hi2c = &hi2c4,
+    .address = 0x48,
+  };
+
+  rv3028c7_t rtc = {
+    .rv3028c7_i2c_hal.hi2c = &hi2c4,
+    .address = 0x52,
+  };
+
+  mt25q_init(&flash);
+  tmp1075_init(&temp_sen);
+  rv3028c7_init(&rtc);
+  printf("Program Start\r\n");
+
+  // rv3028c7_set_hour(&rtc,8);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    printf("Hello World\r\n");
-    char buffer[50];
-    uint32_t len = sprintf(buffer, "UART2\r\n");
-    HAL_UART_Transmit(&huart2, buffer, len, 100);
-    len = sprintf(buffer, "UART4\r\n");
-    HAL_UART_Transmit(&huart4, buffer, len, 100);
-    len = sprintf(buffer, "UART3\r\n");
-    HAL_UART_Transmit(&huart3, buffer, len, 100);
-    /* USER CODE BEGIN PV */
-    CAN_TxHeaderTypeDef TxHeader;
-    CAN_RxHeaderTypeDef RxHeader;
-    uint32_t TxMailbox;
-    uint8_t TxData[8];
-    uint8_t RxData[8];
-    /* USER CODE END PV */
+    // printf("Hello World\r\n");
+    // char buffer[50];
+    // uint32_t len = sprintf(buffer, "UART2\r\n");
+    // HAL_UART_Transmit(&huart2, buffer, len, 100);
+    // len = sprintf(buffer, "UART4\r\n");
+    // HAL_UART_Transmit(&huart4, buffer, len, 100);
+    // len = sprintf(buffer, "UART3\r\n");
+    // HAL_UART_Transmit(&huart3, buffer, len, 100);
+    // /* USER CODE BEGIN PV */
+    // CAN_TxHeaderTypeDef TxHeader;
+    // CAN_RxHeaderTypeDef RxHeader;
+    // uint32_t TxMailbox;
+    // uint8_t TxData[8];
+    // uint8_t RxData[8];
+    // /* USER CODE END PV */
 
-    // ... (within your main application loop) ...
+    // // ... (within your main application loop) ...
 
-    /* Configure the message to transmit */
-    TxHeader.StdId = 0x123;                // Standard Identifier (11-bit), e.g., 0x446
-    // TxHeader.ExtId = 0x01;                 // Extended Identifier (not used in this standard example)
-    TxHeader.RTR = CAN_RTR_DATA;           // Data frame, not remote transmission request
-    TxHeader.IDE = CAN_ID_STD;             // Use standard ID
-    TxHeader.DLC = 8;                      // Data Length Code: sending 2 data bytes
-    TxHeader.TransmitGlobalTime = DISABLE; // Disable global time
+    // /* Configure the message to transmit */
+    // TxHeader.StdId = 0x123;                // Standard Identifier (11-bit), e.g., 0x446
+    // // TxHeader.ExtId = 0x01;                 // Extended Identifier (not used in this standard example)
+    // TxHeader.RTR = CAN_RTR_DATA;           // Data frame, not remote transmission request
+    // TxHeader.IDE = CAN_ID_STD;             // Use standard ID
+    // TxHeader.DLC = 8;                      // Data Length Code: sending 2 data bytes
+    // TxHeader.TransmitGlobalTime = DISABLE; // Disable global time
 
-    /* Load data into the TxData array */
-    TxData[0] = 50;   // First byte of data
-    TxData[1] = 0xAA; // Second byte of data
-    TxData[2] = 50;   // First byte of data
-    TxData[3] = 0xAA; // Second byte of data
-    TxData[4] = 50;   // First byte of data
-    TxData[5] = 0xAA; // Second byte of data
-    TxData[6] = 50;   // First byte of data
-    TxData[7] = 0xAA; // Second byte of data
-    /* Request transmission */
-    if (HAL_CAN_AddTxMessage(&hcan2, &TxHeader, TxData, &TxMailbox) != HAL_OK)
-    {
-      printf("There's an Error Transmitting CAN\r\n");
-      /* Transmission request Error */
-      Error_Handler();
+    // /* Load data into the TxData array */
+    // TxData[0] = 50;   // First byte of data
+    // TxData[1] = 0xAA; // Second byte of data
+    // TxData[2] = 50;   // First byte of data
+    // TxData[3] = 0xAA; // Second byte of data
+    // TxData[4] = 50;   // First byte of data
+    // TxData[5] = 0xAA; // Second byte of data
+    // TxData[6] = 50;   // First byte of data
+    // TxData[7] = 0xAA; // Second byte of data
+    // /* Request transmission */
+    // if (HAL_CAN_AddTxMessage(&hcan2, &TxHeader, TxData, &TxMailbox) != HAL_OK)
+    // {
+    //   printf("There's an Error Transmitting CAN\r\n");
+    //   /* Transmission request Error */
+    //   Error_Handler();
+    // }
+    uint8_t id[MT25QL_REG_DEVICE_ID_LEN];
+    hal_status_t ret = mt25q_read_jedec_id(&flash,id);
+    if (ret != hal_ok){
+      printf("Read Flash ID Error");
     }
+    else{
+      printf("Flash JEDEC ID ");
+      for (int i = 0;i < MT25QL_REG_DEVICE_ID_LEN; i++){
+        printf("0x%02X ",id[i]);
+      }
+      printf("\r\n");
+    }
+
+    int32_t temp = 0;
+    ret = tmp1075_read_temp(&temp_sen,&temp);
+    if (ret != hal_ok){
+      printf("Read Temperature Error");
+    }
+    else{
+      printf("Temperature : %ld\r\n",temp);
+    }
+
+    date_time_t datetime;
+	  rv3028c7_read_time(&rtc, &datetime);
+	  printf("20%02d/%d/%d %d:%d:%d\r\n",datetime.year,datetime.month,datetime.day,datetime.hour,datetime.min,datetime.sec);
 
     HAL_Delay(1000);
 
@@ -179,24 +241,24 @@ int main(void)
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-   */
+  */
   if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Initializes the RCC Oscillators according to the specified parameters
-   * in the RCC_OscInitTypeDef structure.
-   */
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -212,8 +274,9 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-   */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
@@ -226,10 +289,10 @@ void SystemClock_Config(void)
 }
 
 /**
- * @brief CAN2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief CAN2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_CAN2_Init(void)
 {
 
@@ -259,13 +322,14 @@ static void MX_CAN2_Init(void)
   /* USER CODE BEGIN CAN2_Init 2 */
 
   /* USER CODE END CAN2_Init 2 */
+
 }
 
 /**
- * @brief I2C4 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief I2C4 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_I2C4_Init(void)
 {
 
@@ -291,14 +355,14 @@ static void MX_I2C4_Init(void)
   }
 
   /** Configure Analogue filter
-   */
+  */
   if (HAL_I2CEx_ConfigAnalogFilter(&hi2c4, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Configure Digital filter
-   */
+  */
   if (HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0) != HAL_OK)
   {
     Error_Handler();
@@ -306,13 +370,14 @@ static void MX_I2C4_Init(void)
   /* USER CODE BEGIN I2C4_Init 2 */
 
   /* USER CODE END I2C4_Init 2 */
+
 }
 
 /**
- * @brief SPI1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_SPI1_Init(void)
 {
 
@@ -345,13 +410,14 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
 }
 
 /**
- * @brief SPI2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_SPI2_Init(void)
 {
 
@@ -366,7 +432,7 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
@@ -384,13 +450,14 @@ static void MX_SPI2_Init(void)
   /* USER CODE BEGIN SPI2_Init 2 */
 
   /* USER CODE END SPI2_Init 2 */
+
 }
 
 /**
- * @brief UART4 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief UART4 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_UART4_Init(void)
 {
 
@@ -418,13 +485,14 @@ static void MX_UART4_Init(void)
   /* USER CODE BEGIN UART4_Init 2 */
 
   /* USER CODE END UART4_Init 2 */
+
 }
 
 /**
- * @brief UART5 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief UART5 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_UART5_Init(void)
 {
 
@@ -452,13 +520,14 @@ static void MX_UART5_Init(void)
   /* USER CODE BEGIN UART5_Init 2 */
 
   /* USER CODE END UART5_Init 2 */
+
 }
 
 /**
- * @brief USART1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART1_UART_Init(void)
 {
 
@@ -486,13 +555,14 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* USER CODE END USART1_Init 2 */
+
 }
 
 /**
- * @brief USART2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART2_UART_Init(void)
 {
 
@@ -520,13 +590,14 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
 }
 
 /**
- * @brief USART3 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART3_UART_Init(void)
 {
 
@@ -554,13 +625,14 @@ static void MX_USART3_UART_Init(void)
   /* USER CODE BEGIN USART3_Init 2 */
 
   /* USER CODE END USART3_Init 2 */
+
 }
 
 /**
- * @brief GPIO Initialization Function
- * @param None
- * @retval None
- */
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -585,7 +657,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, NOR_RST_Pin | NOR_CS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, NOR_RST_Pin|NOR_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : TEMP_ALERT_Pin */
   GPIO_InitStruct.Pin = TEMP_ALERT_Pin;
@@ -614,7 +686,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : NOR_RST_Pin NOR_CS_Pin */
-  GPIO_InitStruct.Pin = NOR_RST_Pin | NOR_CS_Pin;
+  GPIO_InitStruct.Pin = NOR_RST_Pin|NOR_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -644,9 +716,9 @@ PUTCHAR_PROTOTYPE
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -659,12 +731,12 @@ void Error_Handler(void)
 }
 #ifdef USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
