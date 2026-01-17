@@ -124,39 +124,68 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_CAN_Start(&hcan2);
 
-  
   gpio_t cs_flash = {
-    .GPIOx = NOR_CS_GPIO_Port,
-    .Pin = NOR_CS_Pin
-  };
+      .GPIOx = NOR_CS_GPIO_Port,
+      .Pin = NOR_CS_Pin};
 
   gpio_t rst_flash = {
-    .GPIOx = NOR_RST_GPIO_Port,
-    .Pin = NOR_RST_Pin,
+      .GPIOx = NOR_RST_GPIO_Port,
+      .Pin = NOR_RST_Pin,
   };
 
   mt25q_t flash = {
-    .flash_spi.hspi = &hspi2,
-    .flash_spi.cs_pin = cs_flash,
-    .rst_pin = rst_flash,
+      .flash_spi.hspi = &hspi2,
+      .flash_spi.cs_pin = cs_flash,
+      .rst_pin = rst_flash,
   };
 
   tmp1075_t temp_sen = {
-    .tmp1075_i2c_hal.hi2c = &hi2c4,
-    .address = 0x48,
+      .tmp1075_i2c_hal.hi2c = &hi2c4,
+      .address = 0x48,
   };
 
   rv3028c7_t rtc = {
-    .rv3028c7_i2c_hal.hi2c = &hi2c4,
-    .address = 0x52,
+      .rv3028c7_i2c_hal.hi2c = &hi2c4,
+      .address = 0x52,
   };
 
   mt25q_init(&flash);
   tmp1075_init(&temp_sen);
   rv3028c7_init(&rtc);
   printf("Program Start\r\n");
-
   
+  fs_init(&flash);
+  lfs_file_t file;
+  // mount the filesystem
+  int err = lfs_mount(&lfs, &cfg);
+
+  // reformat if we can't mount the filesystem
+  // this should only happen on the first boot
+  if (err)
+  {
+    printf("lfs mount error\r\n");
+    lfs_format(&lfs, &cfg);
+    lfs_mount(&lfs, &cfg);
+  }
+
+  // read current count
+  uint32_t boot_count = 0;
+  lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
+  lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+
+  // update boot count
+  boot_count += 1;
+  lfs_file_rewind(&lfs, &file);
+  lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
+
+  // remember the storage is not updated until the file is closed successfully
+  lfs_file_close(&lfs, &file);
+
+  // release any resources we were using
+  lfs_unmount(&lfs);
+
+  // print the boot count
+  printf("boot_count: %ld\n", boot_count);
 
   // rv3028c7_set_hour(&rtc,8);
 
@@ -209,32 +238,37 @@ int main(void)
     //   Error_Handler();
     // }
     uint8_t id[MT25QL_REG_DEVICE_ID_LEN];
-    hal_status_t ret = mt25q_read_jedec_id(&flash,id);
-    if (ret != hal_ok){
+    hal_status_t ret = mt25q_read_jedec_id(&flash, id);
+    if (ret != hal_ok)
+    {
       printf("Read Flash ID Error");
     }
-    else{
+    else
+    {
       printf("Flash JEDEC ID ");
-      for (int i = 0;i < MT25QL_REG_DEVICE_ID_LEN; i++){
-        printf("0x%02X ",id[i]);
+      for (int i = 0; i < MT25QL_REG_DEVICE_ID_LEN; i++)
+      {
+        printf("0x%02X ", id[i]);
       }
       printf("\r\n");
     }
 
     int32_t temp = 0;
-    ret = tmp1075_read_temp(&temp_sen,&temp);
-    if (ret != hal_ok){
+    ret = tmp1075_read_temp(&temp_sen, &temp);
+    if (ret != hal_ok)
+    {
       printf("Read Temperature Error");
     }
-    else{
-      printf("Temperature : %ld\r\n",temp);
+    else
+    {
+      printf("Temperature : %ld\r\n", temp);
     }
 
     date_time_t datetime;
-	  rv3028c7_read_time(&rtc, &datetime);
-	  printf("20%02d/%d/%d %d:%d:%d\r\n",datetime.year,datetime.month,datetime.day,datetime.hour,datetime.min,datetime.sec);
+    rv3028c7_read_time(&rtc, &datetime);
+    printf("20%02d/%d/%d %d:%d:%d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
 
-    uint8_t write_buffer[16] = {0x11,0x22,0x33,0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
+    uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
     uint8_t read_buffer[16] = {0};
     uint32_t target_addr = 0x01000000U; // 16MB offset
 
@@ -242,21 +276,22 @@ int main(void)
     ret = hal_error;
     if ((ret = mt25ql_4k_sector_erase(&flash, target_addr)) == hal_ok)
     {
-        printf("Sector Erase no error\r\n");
-        // 2. Program Data
-        mt25ql_page_program(&flash, target_addr, write_buffer, 16);
-        
-        // 3. Read Back
-        mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
-    }
-    else{
-        printf("Sector Erase Error : %d\r\n",ret);
+      printf("Sector Erase no error\r\n");
+      // 2. Program Data
+      mt25ql_page_program(&flash, target_addr, write_buffer, 16);
 
+      // 3. Read Back
+      mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
+    }
+    else
+    {
+      printf("Sector Erase Error : %d\r\n", ret);
     }
 
     printf("Flash : ");
-    for (int i = 0; i < 16; i++){
-      printf("0x%02X ",read_buffer[i]);
+    for (int i = 0; i < 16; i++)
+    {
+      printf("0x%02X ", read_buffer[i]);
     }
     printf("\r\n\r\n");
 
