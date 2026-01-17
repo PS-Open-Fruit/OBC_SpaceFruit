@@ -268,32 +268,32 @@ int main(void)
     rv3028c7_read_time(&rtc, &datetime);
     printf("20%02d/%d/%d %d:%d:%d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
 
-    uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
-    uint8_t read_buffer[16] = {0};
-    uint32_t target_addr = 0x01000000U; // 16MB offset
+    // uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
+    // uint8_t read_buffer[16] = {0};
+    // uint32_t target_addr = 0x01000000U; // 16MB offset
 
-    // 1. Erase Sector
-    ret = hal_error;
-    if ((ret = mt25ql_4k_sector_erase(&flash, target_addr)) == hal_ok)
-    {
-      printf("Sector Erase no error\r\n");
-      // 2. Program Data
-      mt25ql_page_program(&flash, target_addr, write_buffer, 16);
+    // // 1. Erase Sector
+    // ret = hal_error;
+    // if ((ret = mt25ql_4k_sector_erase(&flash, target_addr)) == hal_ok)
+    // {
+    //   printf("Sector Erase no error\r\n");
+    //   // 2. Program Data
+    //   mt25ql_page_program(&flash, target_addr, write_buffer, 16);
 
-      // 3. Read Back
-      mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
-    }
-    else
-    {
-      printf("Sector Erase Error : %d\r\n", ret);
-    }
+    //   // 3. Read Back
+    //   mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
+    // }
+    // else
+    // {
+    //   printf("Sector Erase Error : %d\r\n", ret);
+    // }
 
-    printf("Flash : ");
-    for (int i = 0; i < 16; i++)
-    {
-      printf("0x%02X ", read_buffer[i]);
-    }
-    printf("\r\n\r\n");
+    // printf("Flash : ");
+    // for (int i = 0; i < 16; i++)
+    // {
+    //   printf("0x%02X ", read_buffer[i]);
+    // }
+    // printf("\r\n\r\n");
 
     HAL_Delay(1000);
 
