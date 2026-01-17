@@ -76,7 +76,10 @@ Core/Src/syscalls.c \
 obc-drivers/src/hal_stm32.c \
 obc-drivers/src/mt25ql.c \
 obc-drivers/src/rv3028c7.c \
-obc-drivers/src/tmp1075.c
+obc-drivers/src/tmp1075.c \
+obc-drivers/src/littlefs_port.c \
+littlefs/lfs.c \
+littlefs/lfs_util.c \
 
 # ASM sources
 ASM_SOURCES =  \
@@ -146,7 +149,8 @@ C_INCLUDES =  \
 -IMiddlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc \
 -IDrivers/CMSIS/Device/ST/STM32L4xx/Include \
 -IDrivers/CMSIS/Include \
--Iobc-drivers/inc/
+-Iobc-drivers/inc \
+-Ilittlefs
 
 
 # compile gcc flags

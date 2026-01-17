@@ -1,3 +1,6 @@
 [submodule "obc-drivers"]
 	path = obc-drivers
 	url = git@github.com:PS-Open-Fruit/obc-drivers.git
+[submodule "littlefs"]
+	path = littlefs
+	url = https://github.com/littlefs-project/littlefs.git
