@@ -22,7 +22,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
-
+#include "main.h"
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -262,6 +262,25 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
+  uint32_t copy_len;
+
+  if ((Buf == NULL) || (Len == NULL)){
+      return USBD_FAIL;
+  }
+
+  /* Bound the copy length */
+  if (*Len <= APP_RX_DATA_SIZE){
+      copy_len = *Len;
+  }
+  else{
+      copy_len = APP_RX_DATA_SIZE;
+  }
+
+  /* Copy received data into application buffer */
+  (void)memcpy(usb_buff.usb_buff, Buf, copy_len);
+  usb_buff.len = copy_len;
+  usb_buff.is_new_message = 1;
+
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);
   /* USER CODE END 6 */

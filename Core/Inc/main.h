@@ -36,7 +36,15 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+#define USB_RX_SIZE 2048
 
+typedef struct usb_data{
+  uint32_t len;
+  uint8_t is_new_message;
+  uint8_t usb_buff[USB_RX_SIZE];
+} usb_data_t;
+
+extern usb_data_t usb_buff;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/

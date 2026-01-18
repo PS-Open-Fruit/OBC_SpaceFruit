@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "usbd_cdc_if.h"
 #include "mt25ql.h"
 #include "rv3028c7.h"
 #include "tmp1075.h"
@@ -30,6 +31,11 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
+usb_data_t usb_buff = {
+  .is_new_message = 0,
+  .len = 0,
+};
 
 /* USER CODE END PTD */
 
@@ -58,6 +64,8 @@ UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+
+usb_data_t usb_buff;
 
 /* USER CODE END PV */
 
@@ -122,7 +130,7 @@ int main(void)
   MX_CAN2_Init();
   MX_I2C4_Init();
   /* USER CODE BEGIN 2 */
-  HAL_CAN_Start(&hcan2);
+  // HAL_CAN_Start(&hcan2);
 
   gpio_t cs_flash = {
       .GPIOx = NOR_CS_GPIO_Port,
@@ -268,6 +276,15 @@ int main(void)
     rv3028c7_read_time(&rtc, &datetime);
     printf("20%02d/%d/%d %d:%d:%d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
 
+    if (usb_buff.is_new_message){
+      printf("USB Buff len : %lu, Buf : ",usb_buff.len);
+      for (int i = 0; i < usb_buff.len;i++){
+        printf("0x%02X ",usb_buff.usb_buff[i]);
+      }
+      usb_buff.is_new_message = 0;
+      printf("\r\n");
+    }
+
     // uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
     // uint8_t read_buffer[16] = {0};
     // uint32_t target_addr = 0x01000000U; // 16MB offset
@@ -295,6 +312,7 @@ int main(void)
     // }
     // printf("\r\n\r\n");
 
+    printf("\r\n");
     HAL_Delay(1000);
 
     /* USER CODE END WHILE */
