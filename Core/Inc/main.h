@@ -31,12 +31,12 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "cmsis_os.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-#define USB_RX_SIZE 2048
+#define USB_RX_SIZE 1024
 
 typedef struct usb_data{
   uint32_t len;
@@ -44,7 +44,8 @@ typedef struct usb_data{
   uint8_t usb_buff[USB_RX_SIZE];
 } usb_data_t;
 
-extern usb_data_t usb_buff;
+extern osMessageQueueId_t cdcDataQueueHandle;
+
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/

@@ -31,6 +31,7 @@
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
+typedef StaticQueue_t osStaticMessageQDef_t;
 /* USER CODE BEGIN PTD */
 
 usb_data_t usb_buff = {
@@ -68,24 +69,30 @@ UART_HandleTypeDef huart3;
 osThreadId_t MainTaskHandle;
 const osThreadAttr_t MainTask_attributes = {
   .name = "MainTask",
-  .stack_size = 512 * 4,
+  .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for USBTask */
 osThreadId_t USBTaskHandle;
 const osThreadAttr_t USBTask_attributes = {
   .name = "USBTask",
-  .stack_size = 512 * 4,
+  .stack_size = 3072 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for usbLock */
-osSemaphoreId_t usbLockHandle;
-const osSemaphoreAttr_t usbLock_attributes = {
-  .name = "usbLock"
+/* Definitions for cdcDataQueue */
+osMessageQueueId_t cdcDataQueueHandle;
+uint8_t cdcDataQueueBuffer[ 128 * sizeof( usb_data_t ) ];
+osStaticMessageQDef_t cdcDataQueueControlBlock;
+const osMessageQueueAttr_t cdcDataQueue_attributes = {
+  .name = "cdcDataQueue",
+  .cb_mem = &cdcDataQueueControlBlock,
+  .cb_size = sizeof(cdcDataQueueControlBlock),
+  .mq_mem = &cdcDataQueueBuffer,
+  .mq_size = sizeof(cdcDataQueueBuffer)
 };
 /* USER CODE BEGIN PV */
 
-usb_data_t usb_buff;
+// usb_data_t usb_buff;
 
 /* USER CODE END PV */
 
@@ -152,9 +159,8 @@ int main(void)
   MX_CAN2_Init();
   MX_I2C4_Init();
   /* USER CODE BEGIN 2 */
+  printf("int main();\r\n");
   // HAL_CAN_Start(&hcan2);
-
-
 
   // rv3028c7_set_hour(&rtc,8);
 
@@ -167,10 +173,6 @@ int main(void)
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
-  /* Create the semaphores(s) */
-  /* creation of usbLock */
-  usbLockHandle = osSemaphoreNew(1, 1, &usbLock_attributes);
-
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
@@ -178,6 +180,10 @@ int main(void)
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
+
+  /* Create the queue(s) */
+  /* creation of cdcDataQueue */
+  cdcDataQueueHandle = osMessageQueueNew (128, sizeof(usb_data_t), &cdcDataQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -701,8 +707,8 @@ void mainTask(void *argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
-
-    gpio_t cs_flash = {
+  printf("Start of mainTask\r\n");
+  gpio_t cs_flash = {
       .GPIOx = NOR_CS_GPIO_Port,
       .Pin = NOR_CS_Pin};
 
@@ -841,15 +847,6 @@ void mainTask(void *argument)
     // rv3028c7_read_time(&rtc, &datetime);
     // printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
 
-    // if (usb_buff.is_new_message){
-    //   printf("USB Buff len : %lu, Buf : ",usb_buff.len);
-    //   for (int i = 0; i < usb_buff.len;i++){
-    //     printf("0x%02X ",usb_buff.usb_buff[i]);
-    //   }
-    //   usb_buff.is_new_message = 0;
-    //   printf("\r\n");
-    // }
-
     // uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
     // uint8_t read_buffer[16] = {0};
     // uint32_t target_addr = 0x01000000U; // 16MB offset
@@ -877,8 +874,7 @@ void mainTask(void *argument)
     // }
     // printf("\r\n\r\n");
 
-    // printf("\r\n");
-    printf("Hello World Main Task\r\n");
+    printf("hello\r\n");
     osDelay(1000);
   }
   printf("It exits main task\r\n");
@@ -895,12 +891,32 @@ void mainTask(void *argument)
 void usbTask(void *argument)
 {
   /* USER CODE BEGIN usbTask */
-  /* Infinite loop */
+  usb_data_t usb_data_rx = {
+    .is_new_message = 0,
+    .len = 0
+  }; // Local buffer to hold received queue item
+  uint32_t counter = 0;
   for (;;)
   {
-    printf("Hello World USB Task\r\n");
-    osDelay(1000);
-    // osDelay(1);
+    // Block here until data arrives. No CPU usage while waiting.
+    osStatus_t status = osMessageQueueGet(cdcDataQueueHandle, (void*)&usb_data_rx, NULL, osWaitForever);
+
+    if (status == osOK)
+    {
+      // Data received! Process it.
+      printf("receive len : %ld, new messge flag : %d\r\n",usb_data_rx.len,usb_data_rx.is_new_message);
+      counter+=usb_data_rx.len;
+      printf("Len: %lu, Data: ", usb_data_rx.len);
+      for (int i = 0; i < usb_data_rx.len; i++)
+      {
+        printf("%02X ", usb_data_rx.usb_buff[i]);
+      }
+      printf("\r\n");
+      printf("All Data Size : %lu\r\n",counter);
+    }
+    
+    // NO osDelay(1) here! 
+    // We want to loop back immediately to catch the next packet if one is waiting.
   }
   /* USER CODE END usbTask */
 }

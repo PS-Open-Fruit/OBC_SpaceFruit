@@ -37,6 +37,6 @@ if port:
     with open("image.jpg",'rb') as file:
         content = file.read()
         ret = ser.write(content)
-        # ret = ser.write(b"abcdefghijklmno")
+        # ret = ser.write(b"abcdef")
         print(ret)
     ser.close()

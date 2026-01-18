@@ -261,27 +261,37 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-  uint32_t copy_len;
+  usb_data_t usb_buff; // Temporary stack buffer
 
-  if ((Buf == NULL) || (Len == NULL)){
+  /* 1. Safety Checks */
+  if ((Buf == NULL) || (Len == NULL)) {
       return USBD_FAIL;
   }
 
-  /* Bound the copy length */
-  if (*Len <= APP_RX_DATA_SIZE){
-      copy_len = *Len;
-  }
-  else{
+  /* 2. Cap length */
+  uint32_t copy_len = *Len;
+  if (copy_len > APP_RX_DATA_SIZE) {
       copy_len = APP_RX_DATA_SIZE;
   }
 
-  /* Copy received data into application buffer */
-  (void)memcpy(usb_buff.usb_buff, Buf, copy_len);
+  /* 3. Copy data to local struct */
+  // Use 'usb_buff.usb_buff' assuming your struct has a member named 'usb_buff'
+  memcpy(usb_buff.usb_buff, Buf, copy_len);
   usb_buff.len = copy_len;
   usb_buff.is_new_message = 1;
 
+  printf("len : %ld, new messge flag : %d\r\n",usb_buff.len,usb_buff.is_new_message);
+
+  /* 4. Send to Queue (Timeout MUST be 0 in ISR) */
+  if (cdcDataQueueHandle != NULL) {
+      // Note: We cast to void* to satisfy the API, but it copies by value
+      osMessageQueuePut(cdcDataQueueHandle, (void*) &usb_buff, 0U, 0U);
+  }
+
+  /* 5. Re-arm USB for next packet (Standard placement) */
+  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+
   return (USBD_OK);
   /* USER CODE END 6 */
 }
