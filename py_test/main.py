@@ -34,5 +34,9 @@ port = select_com_port()
 if port:
     ser = serial.Serial(port, baudrate=115200, timeout=1)
     print(f"Connected to {port}")
-    ser.write(b"abcdefghijklmno")
+    with open("image.jpg",'rb') as file:
+        content = file.read()
+        ret = ser.write(content)
+        # ret = ser.write(b"abcdefghijklmno")
+        print(ret)
     ser.close()

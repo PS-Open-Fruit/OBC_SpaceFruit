@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -33,8 +34,8 @@
 /* USER CODE BEGIN PTD */
 
 usb_data_t usb_buff = {
-  .is_new_message = 0,
-  .len = 0,
+    .is_new_message = 0,
+    .len = 0,
 };
 
 /* USER CODE END PTD */
@@ -63,6 +64,25 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
+/* Definitions for MainTask */
+osThreadId_t MainTaskHandle;
+const osThreadAttr_t MainTask_attributes = {
+  .name = "MainTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for USBTask */
+osThreadId_t USBTaskHandle;
+const osThreadAttr_t USBTask_attributes = {
+  .name = "USBTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for usbLock */
+osSemaphoreId_t usbLockHandle;
+const osSemaphoreAttr_t usbLock_attributes = {
+  .name = "usbLock"
+};
 /* USER CODE BEGIN PV */
 
 usb_data_t usb_buff;
@@ -81,6 +101,9 @@ static void MX_USART3_UART_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_I2C4_Init(void);
+void mainTask(void *argument);
+void usbTask(void *argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -125,196 +148,65 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
-  MX_USB_DEVICE_Init();
   MX_SPI2_Init();
   MX_CAN2_Init();
   MX_I2C4_Init();
   /* USER CODE BEGIN 2 */
   // HAL_CAN_Start(&hcan2);
 
-  gpio_t cs_flash = {
-      .GPIOx = NOR_CS_GPIO_Port,
-      .Pin = NOR_CS_Pin};
 
-  gpio_t rst_flash = {
-      .GPIOx = NOR_RST_GPIO_Port,
-      .Pin = NOR_RST_Pin,
-  };
-
-  mt25q_t flash = {
-      .flash_spi.hspi = &hspi2,
-      .flash_spi.cs_pin = cs_flash,
-      .rst_pin = rst_flash,
-  };
-
-  tmp1075_t temp_sen = {
-      .tmp1075_i2c_hal.hi2c = &hi2c4,
-      .address = 0x48,
-  };
-
-  rv3028c7_t rtc = {
-      .rv3028c7_i2c_hal.hi2c = &hi2c4,
-      .address = 0x52,
-  };
-
-  mt25q_init(&flash);
-  tmp1075_init(&temp_sen);
-  rv3028c7_init(&rtc);
-  printf("Program Start\r\n");
-  
-  fs_init(&flash);
-  lfs_file_t file;
-  // mount the filesystem
-  int err = lfs_mount(&lfs, &cfg);
-
-  // reformat if we can't mount the filesystem
-  // this should only happen on the first boot
-  if (err)
-  {
-    printf("lfs mount error\r\n");
-    lfs_format(&lfs, &cfg);
-    lfs_mount(&lfs, &cfg);
-  }
-
-  // read current count
-  uint32_t boot_count = 0;
-  lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
-  lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
-
-  // update boot count
-  boot_count += 1;
-  lfs_file_rewind(&lfs, &file);
-  lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
-
-  // remember the storage is not updated until the file is closed successfully
-  lfs_file_close(&lfs, &file);
-
-  // release any resources we were using
-  lfs_unmount(&lfs);
-
-  // print the boot count
-  printf("boot_count: %ld\n", boot_count);
 
   // rv3028c7_set_hour(&rtc,8);
 
   /* USER CODE END 2 */
 
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of usbLock */
+  usbLockHandle = osSemaphoreNew(1, 1, &usbLock_attributes);
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of MainTask */
+  MainTaskHandle = osThreadNew(mainTask, NULL, &MainTask_attributes);
+
+  /* creation of USBTask */
+  USBTaskHandle = osThreadNew(usbTask, NULL, &USBTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // printf("Hello World\r\n");
-    // char buffer[50];
-    // uint32_t len = sprintf(buffer, "UART2\r\n");
-    // HAL_UART_Transmit(&huart2, buffer, len, 100);
-    // len = sprintf(buffer, "UART4\r\n");
-    // HAL_UART_Transmit(&huart4, buffer, len, 100);
-    // len = sprintf(buffer, "UART3\r\n");
-    // HAL_UART_Transmit(&huart3, buffer, len, 100);
-    // /* USER CODE BEGIN PV */
-    // CAN_TxHeaderTypeDef TxHeader;
-    // CAN_RxHeaderTypeDef RxHeader;
-    // uint32_t TxMailbox;
-    // uint8_t TxData[8];
-    // uint8_t RxData[8];
-    // /* USER CODE END PV */
-
-    // // ... (within your main application loop) ...
-
-    // /* Configure the message to transmit */
-    // TxHeader.StdId = 0x123;                // Standard Identifier (11-bit), e.g., 0x446
-    // // TxHeader.ExtId = 0x01;                 // Extended Identifier (not used in this standard example)
-    // TxHeader.RTR = CAN_RTR_DATA;           // Data frame, not remote transmission request
-    // TxHeader.IDE = CAN_ID_STD;             // Use standard ID
-    // TxHeader.DLC = 8;                      // Data Length Code: sending 2 data bytes
-    // TxHeader.TransmitGlobalTime = DISABLE; // Disable global time
-
-    // /* Load data into the TxData array */
-    // TxData[0] = 50;   // First byte of data
-    // TxData[1] = 0xAA; // Second byte of data
-    // TxData[2] = 50;   // First byte of data
-    // TxData[3] = 0xAA; // Second byte of data
-    // TxData[4] = 50;   // First byte of data
-    // TxData[5] = 0xAA; // Second byte of data
-    // TxData[6] = 50;   // First byte of data
-    // TxData[7] = 0xAA; // Second byte of data
-    // /* Request transmission */
-    // if (HAL_CAN_AddTxMessage(&hcan2, &TxHeader, TxData, &TxMailbox) != HAL_OK)
-    // {
-    //   printf("There's an Error Transmitting CAN\r\n");
-    //   /* Transmission request Error */
-    //   Error_Handler();
-    // }
-    uint8_t id[MT25QL_REG_DEVICE_ID_LEN];
-    hal_status_t ret = mt25q_read_jedec_id(&flash, id);
-    if (ret != hal_ok)
-    {
-      printf("Read Flash ID Error");
-    }
-    else
-    {
-      printf("Flash JEDEC ID ");
-      for (int i = 0; i < MT25QL_REG_DEVICE_ID_LEN; i++)
-      {
-        printf("0x%02X ", id[i]);
-      }
-      printf("\r\n");
-    }
-
-    int32_t temp = 0;
-    ret = tmp1075_read_temp(&temp_sen, &temp);
-    if (ret != hal_ok)
-    {
-      printf("Read Temperature Error");
-    }
-    else
-    {
-      printf("Temperature : %ld\r\n", temp);
-    }
-
-    date_time_t datetime;
-    rv3028c7_read_time(&rtc, &datetime);
-    printf("20%02d/%d/%d %d:%d:%d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
-
-    if (usb_buff.is_new_message){
-      printf("USB Buff len : %lu, Buf : ",usb_buff.len);
-      for (int i = 0; i < usb_buff.len;i++){
-        printf("0x%02X ",usb_buff.usb_buff[i]);
-      }
-      usb_buff.is_new_message = 0;
-      printf("\r\n");
-    }
-
-    // uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
-    // uint8_t read_buffer[16] = {0};
-    // uint32_t target_addr = 0x01000000U; // 16MB offset
-
-    // // 1. Erase Sector
-    // ret = hal_error;
-    // if ((ret = mt25ql_4k_sector_erase(&flash, target_addr)) == hal_ok)
-    // {
-    //   printf("Sector Erase no error\r\n");
-    //   // 2. Program Data
-    //   mt25ql_page_program(&flash, target_addr, write_buffer, 16);
-
-    //   // 3. Read Back
-    //   mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
-    // }
-    // else
-    // {
-    //   printf("Sector Erase Error : %d\r\n", ret);
-    // }
-
-    // printf("Flash : ");
-    // for (int i = 0; i < 16; i++)
-    // {
-    //   printf("0x%02X ", read_buffer[i]);
-    // }
-    // printf("\r\n\r\n");
-
-    printf("\r\n");
-    HAL_Delay(1000);
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -796,6 +688,244 @@ PUTCHAR_PROTOTYPE
   return ch;
 }
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_mainTask */
+/**
+ * @brief  Function implementing the MainTask thread.
+ * @param  argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_mainTask */
+void mainTask(void *argument)
+{
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
+  /* USER CODE BEGIN 5 */
+
+    gpio_t cs_flash = {
+      .GPIOx = NOR_CS_GPIO_Port,
+      .Pin = NOR_CS_Pin};
+
+  gpio_t rst_flash = {
+      .GPIOx = NOR_RST_GPIO_Port,
+      .Pin = NOR_RST_Pin,
+  };
+
+  mt25q_t flash = {
+      .flash_spi.hspi = &hspi2,
+      .flash_spi.cs_pin = cs_flash,
+      .rst_pin = rst_flash,
+  };
+
+  tmp1075_t temp_sen = {
+      .tmp1075_i2c_hal.hi2c = &hi2c4,
+      .address = 0x48,
+  };
+
+  rv3028c7_t rtc = {
+      .rv3028c7_i2c_hal.hi2c = &hi2c4,
+      .address = 0x52,
+  };
+
+  mt25q_init(&flash);
+  tmp1075_init(&temp_sen);
+  rv3028c7_init(&rtc);
+  printf("Program Start\r\n");
+
+  fs_init(&flash);
+  lfs_file_t file;
+  // mount the filesystem
+  int err = lfs_mount(&lfs, &cfg);
+
+  // reformat if we can't mount the filesystem
+  // this should only happen on the first boot
+  if (err)
+  {
+    printf("lfs mount error\r\n");
+    lfs_format(&lfs, &cfg);
+    lfs_mount(&lfs, &cfg);
+  }
+
+  // read current count
+  uint32_t boot_count = 0;
+  lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
+  lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+
+  // update boot count
+  boot_count += 1;
+  lfs_file_rewind(&lfs, &file);
+  lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
+
+  // remember the storage is not updated until the file is closed successfully
+  lfs_file_close(&lfs, &file);
+
+  // release any resources we were using
+  lfs_unmount(&lfs);
+
+  // print the boot count
+  printf("boot_count: %ld\n", boot_count);
+
+  /* Infinite loop */
+  for (;;)
+  {
+    // printf("Hello World\r\n");
+    // char buffer[50];
+    // uint32_t len = sprintf(buffer, "UART2\r\n");
+    // HAL_UART_Transmit(&huart2, buffer, len, 100);
+    // len = sprintf(buffer, "UART4\r\n");
+    // HAL_UART_Transmit(&huart4, buffer, len, 100);
+    // len = sprintf(buffer, "UART3\r\n");
+    // HAL_UART_Transmit(&huart3, buffer, len, 100);
+    // /* USER CODE BEGIN PV */
+    // CAN_TxHeaderTypeDef TxHeader;
+    // CAN_RxHeaderTypeDef RxHeader;
+    // uint32_t TxMailbox;
+    // uint8_t TxData[8];
+    // uint8_t RxData[8];
+    // /* USER CODE END PV */
+
+    // // ... (within your main application loop) ...
+
+    // /* Configure the message to transmit */
+    // TxHeader.StdId = 0x123;                // Standard Identifier (11-bit), e.g., 0x446
+    // // TxHeader.ExtId = 0x01;                 // Extended Identifier (not used in this standard example)
+    // TxHeader.RTR = CAN_RTR_DATA;           // Data frame, not remote transmission request
+    // TxHeader.IDE = CAN_ID_STD;             // Use standard ID
+    // TxHeader.DLC = 8;                      // Data Length Code: sending 2 data bytes
+    // TxHeader.TransmitGlobalTime = DISABLE; // Disable global time
+
+    // /* Load data into the TxData array */
+    // TxData[0] = 50;   // First byte of data
+    // TxData[1] = 0xAA; // Second byte of data
+    // TxData[2] = 50;   // First byte of data
+    // TxData[3] = 0xAA; // Second byte of data
+    // TxData[4] = 50;   // First byte of data
+    // TxData[5] = 0xAA; // Second byte of data
+    // TxData[6] = 50;   // First byte of data
+    // TxData[7] = 0xAA; // Second byte of data
+    // /* Request transmission */
+    // if (HAL_CAN_AddTxMessage(&hcan2, &TxHeader, TxData, &TxMailbox) != HAL_OK)
+    // {
+    //   printf("There's an Error Transmitting CAN\r\n");
+    //   /* Transmission request Error */
+    //   Error_Handler();
+    // }
+    // uint8_t id[MT25QL_REG_DEVICE_ID_LEN];
+    // hal_status_t ret = mt25q_read_jedec_id(&flash, id);
+    // if (ret != hal_ok)
+    // {
+    //   printf("Read Flash ID Error");
+    // }
+    // else
+    // {
+    //   printf("Flash JEDEC ID ");
+    //   for (int i = 0; i < MT25QL_REG_DEVICE_ID_LEN; i++)
+    //   {
+    //     printf("0x%02X ", id[i]);
+    //   }
+    //   printf("\r\n");
+    // }
+
+    // int32_t temp = 0;
+    // hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
+    // if (ret != hal_ok)
+    // {
+    //   printf("Read Temperature Error");
+    // }
+    // else
+    // {
+    //   printf("Temperature : %ld\r\n", temp);
+    // }
+
+    // date_time_t datetime;
+    // rv3028c7_read_time(&rtc, &datetime);
+    // printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
+
+    // if (usb_buff.is_new_message){
+    //   printf("USB Buff len : %lu, Buf : ",usb_buff.len);
+    //   for (int i = 0; i < usb_buff.len;i++){
+    //     printf("0x%02X ",usb_buff.usb_buff[i]);
+    //   }
+    //   usb_buff.is_new_message = 0;
+    //   printf("\r\n");
+    // }
+
+    // uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
+    // uint8_t read_buffer[16] = {0};
+    // uint32_t target_addr = 0x01000000U; // 16MB offset
+
+    // // 1. Erase Sector
+    // ret = hal_error;
+    // if ((ret = mt25ql_4k_sector_erase(&flash, target_addr)) == hal_ok)
+    // {
+    //   printf("Sector Erase no error\r\n");
+    //   // 2. Program Data
+    //   mt25ql_page_program(&flash, target_addr, write_buffer, 16);
+
+    //   // 3. Read Back
+    //   mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
+    // }
+    // else
+    // {
+    //   printf("Sector Erase Error : %d\r\n", ret);
+    // }
+
+    // printf("Flash : ");
+    // for (int i = 0; usb i < 16; i++)
+    // {
+    //   printf("0x%02X ", read_buffer[i]);
+    // }
+    // printf("\r\n\r\n");
+
+    // printf("\r\n");
+    printf("Hello World Main Task\r\n");
+    osDelay(1000);
+  }
+  printf("It exits main task\r\n");
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_usbTask */
+/**
+ * @brief Function implementing the USBTask thread.
+ * @param argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_usbTask */
+void usbTask(void *argument)
+{
+  /* USER CODE BEGIN usbTask */
+  /* Infinite loop */
+  for (;;)
+  {
+    printf("Hello World USB Task\r\n");
+    osDelay(1000);
+    // osDelay(1);
+  }
+  /* USER CODE END usbTask */
+}
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM1 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM1)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
