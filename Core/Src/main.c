@@ -54,7 +54,11 @@ usb_data_t usb_buff = {
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan2;
 
+CRC_HandleTypeDef hcrc;
+
 I2C_HandleTypeDef hi2c4;
+
+IWDG_HandleTypeDef hiwdg;
 
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
@@ -64,6 +68,8 @@ UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_uart4_rx;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* Definitions for MainTask */
 osThreadId_t MainTaskHandle;
@@ -78,6 +84,13 @@ const osThreadAttr_t USBTask_attributes = {
   .name = "USBTask",
   .stack_size = 3072 * 4,
   .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for wdtFeed */
+osThreadId_t wdtFeedHandle;
+const osThreadAttr_t wdtFeed_attributes = {
+  .name = "wdtFeed",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
@@ -99,6 +112,7 @@ const osMessageQueueAttr_t cdcDataQueue_attributes = {
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_UART5_Init(void);
@@ -108,8 +122,11 @@ static void MX_USART3_UART_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_I2C4_Init(void);
+static void MX_CRC_Init(void);
+static void MX_IWDG_Init(void);
 void mainTask(void *argument);
 void usbTask(void *argument);
+void wdtFeedTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -149,6 +166,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_SPI1_Init();
   MX_UART4_Init();
   MX_UART5_Init();
@@ -158,6 +176,8 @@ int main(void)
   MX_SPI2_Init();
   MX_CAN2_Init();
   MX_I2C4_Init();
+  MX_CRC_Init();
+  MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   printf("int main();\r\n");
   // HAL_CAN_Start(&hcan2);
@@ -195,6 +215,9 @@ int main(void)
 
   /* creation of USBTask */
   USBTaskHandle = osThreadNew(usbTask, NULL, &USBTask_attributes);
+
+  /* creation of wdtFeed */
+  wdtFeedHandle = osThreadNew(wdtFeedTask, NULL, &wdtFeed_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -239,8 +262,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
@@ -306,6 +330,37 @@ static void MX_CAN2_Init(void)
 }
 
 /**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
+}
+
+/**
   * @brief I2C4 Initialization Function
   * @param None
   * @retval None
@@ -350,6 +405,35 @@ static void MX_I2C4_Init(void)
   /* USER CODE BEGIN I2C4_Init 2 */
 
   /* USER CODE END I2C4_Init 2 */
+
+}
+
+/**
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_IWDG_Init(void)
+{
+
+  /* USER CODE BEGIN IWDG_Init 0 */
+
+  /* USER CODE END IWDG_Init 0 */
+
+  /* USER CODE BEGIN IWDG_Init 1 */
+
+  /* USER CODE END IWDG_Init 1 */
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_128;
+  hiwdg.Init.Window = 4095;
+  hiwdg.Init.Reload = 120;
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN IWDG_Init 2 */
+
+  /* USER CODE END IWDG_Init 2 */
 
 }
 
@@ -609,6 +693,26 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
+  /* DMA2_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel5_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -816,65 +920,23 @@ void mainTask(void *argument)
     //   /* Transmission request Error */
     //   Error_Handler();
     // }
-    // uint8_t id[MT25QL_REG_DEVICE_ID_LEN];
-    // hal_status_t ret = mt25q_read_jedec_id(&flash, id);
-    // if (ret != hal_ok)
-    // {
-    //   printf("Read Flash ID Error");
-    // }
-    // else
-    // {
-    //   printf("Flash JEDEC ID ");
-    //   for (int i = 0; i < MT25QL_REG_DEVICE_ID_LEN; i++)
-    //   {
-    //     printf("0x%02X ", id[i]);
-    //   }
-    //   printf("\r\n");
-    // }
 
-    // int32_t temp = 0;
-    // hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
-    // if (ret != hal_ok)
-    // {
-    //   printf("Read Temperature Error");
-    // }
-    // else
-    // {
-    //   printf("Temperature : %ld\r\n", temp);
-    // }
+    int32_t temp = 0;
+    hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
+    if (ret != hal_ok)
+    {
+      printf("Read Temperature Error");
+    }
+    else
+    {
+      printf("Temperature : %ld\r\n", temp);
+    }
 
-    // date_time_t datetime;
-    // rv3028c7_read_time(&rtc, &datetime);
-    // printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
+    date_time_t datetime;
+    rv3028c7_read_time(&rtc, &datetime);
+    printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
 
-    // uint8_t write_buffer[16] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC, 0xDD}; // ... filled data
-    // uint8_t read_buffer[16] = {0};
-    // uint32_t target_addr = 0x01000000U; // 16MB offset
-
-    // // 1. Erase Sector
-    // ret = hal_error;
-    // if ((ret = mt25ql_4k_sector_erase(&flash, target_addr)) == hal_ok)
-    // {
-    //   printf("Sector Erase no error\r\n");
-    //   // 2. Program Data
-    //   mt25ql_page_program(&flash, target_addr, write_buffer, 16);
-
-    //   // 3. Read Back
-    //   mt25ql_read_memory(&flash, target_addr, read_buffer, 16);
-    // }
-    // else
-    // {
-    //   printf("Sector Erase Error : %d\r\n", ret);
-    // }
-
-    // printf("Flash : ");
-    // for (int i = 0; usb i < 16; i++)
-    // {
-    //   printf("0x%02X ", read_buffer[i]);
-    // }
-    // printf("\r\n\r\n");
-
-    printf("hello\r\n");
+    printf("\r\n");
     osDelay(1000);
   }
   printf("It exits main task\r\n");
@@ -895,7 +957,6 @@ void usbTask(void *argument)
     .is_new_message = 0,
     .len = 0
   }; // Local buffer to hold received queue item
-  uint32_t counter = 0;
   for (;;)
   {
     // Block here until data arrives. No CPU usage while waiting.
@@ -904,21 +965,41 @@ void usbTask(void *argument)
     if (status == osOK)
     {
       // Data received! Process it.
-      printf("receive len : %ld, new messge flag : %d\r\n",usb_data_rx.len,usb_data_rx.is_new_message);
-      counter+=usb_data_rx.len;
       printf("Len: %lu, Data: ", usb_data_rx.len);
-      for (int i = 0; i < usb_data_rx.len; i++)
-      {
-        printf("%02X ", usb_data_rx.usb_buff[i]);
-      }
+      // for (int i = 0; i < usb_data_rx.len; i++)
+      // {
+      //   printf("%02X ", usb_data_rx.usb_buff[i]);
+      // }
       printf("\r\n");
-      printf("All Data Size : %lu\r\n",counter);
+      // printf("All Data Size : %lu\r\n",counter);
     }
     
     // NO osDelay(1) here! 
     // We want to loop back immediately to catch the next packet if one is waiting.
   }
   /* USER CODE END usbTask */
+}
+
+/* USER CODE BEGIN Header_wdtFeedTask */
+/**
+* @brief Function implementing the wdtFeed thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_wdtFeedTask */
+void wdtFeedTask(void *argument)
+{
+  /* USER CODE BEGIN wdtFeedTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    if (HAL_IWDG_Refresh(&hiwdg) != HAL_OK)
+    {
+      printf("IWDT Error");
+    }
+    osDelay(400);
+  }
+  /* USER CODE END wdtFeedTask */
 }
 
 /**

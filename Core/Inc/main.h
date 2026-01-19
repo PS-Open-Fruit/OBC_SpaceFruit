@@ -36,7 +36,7 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-#define USB_RX_SIZE 1024
+#define USB_RX_SIZE 64
 
 typedef struct usb_data{
   uint32_t len;
