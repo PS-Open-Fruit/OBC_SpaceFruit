@@ -53,6 +53,11 @@ UART_HandleTypeDef hlpuart1;
 /* USER CODE BEGIN PV */
 uint8_t rx_buffer[MAX_FRAME_SIZE];
 uint8_t rx_index = 0;
+
+// Buffer for Main Loop processing (Safe from Interrupts)
+uint8_t valid_frame_buf[MAX_FRAME_SIZE];
+uint16_t valid_frame_len = 0;
+volatile uint8_t frame_ready_flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -270,11 +275,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-// For printf() via STLink
-int _write(int file, char *ptr, int len)
+// For printf() via STLink UART
+PUTCHAR_PROTOTYPE
 {
-  HAL_UART_Transmit(&hlpuart1, (uint8_t *)ptr, len, 0xFFFF);
-  return len;
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the USART1 and Loop until the end of transmission */
+  HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
+  return ch;
 }
 
 // --- SLIP Encoder ---
@@ -324,6 +331,26 @@ uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
 void OBC_Process_Loop(void) {
     static uint32_t last_tick = 0;
     
+    // 1. Process Received Packets (Moved out of ISR)
+    if (frame_ready_flag) {
+        uint8_t decoded[128];
+        uint16_t dec_len = SLIP_Decode(valid_frame_buf, valid_frame_len, decoded);
+        
+        if (dec_len > 0) {
+             printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
+             for(int k=0; k<dec_len; k++) printf("%02X ", decoded[k]);
+             printf("\r\n");
+
+             // Check for PONG response
+             if (dec_len == 4 && strncmp((char*)decoded, "PONG", 4) == 0) {
+                 printf("[OBC] >> PONG Received! Link Active.\r\n");
+                 HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+             }
+        }
+        frame_ready_flag = 0; // Clear flag
+    }
+
+    // 2. Periodic Tasks
     // Every 2 seconds, ping the Payload
     if (HAL_GetTick() - last_tick > 2000) {
         last_tick = HAL_GetTick();
@@ -343,7 +370,7 @@ void OBC_Process_Loop(void) {
     }
 }
 
-// --- Receive Handler (Called from usbd_cdc_if.c) ---
+// --- Receive Handler (Called from usbd_cdc_if.c ISR) ---
 void OBC_On_Receive(uint8_t* Buf, uint32_t *Len) {
     for (uint32_t i = 0; i < *Len; i++) {
         uint8_t byte = Buf[i];
@@ -352,26 +379,20 @@ void OBC_On_Receive(uint8_t* Buf, uint32_t *Len) {
             rx_buffer[rx_index++] = byte;
         }
         
+        // Sync: Reset if first byte isn't FEND
         if (rx_index == 1 && byte != FEND) {
             rx_index = 0; 
         }
         
+        // End Flag Found
         if (rx_index > 1 && byte == FEND) {
-            uint8_t decoded[128];
-            uint16_t dec_len = SLIP_Decode(rx_buffer, rx_index, decoded);
-            
-            if (dec_len > 0) {
-                 printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
-                 for(int k=0; k<dec_len; k++) printf("%02X ", decoded[k]);
-                 printf("\r\n");
-
-                 // Check for PONG response
-                 if (dec_len == 4 && strncmp((char*)decoded, "PONG", 4) == 0) {
-                     printf("[OBC] >> PONG Received! Link Active.\r\n");
-                     // Toggle Green LED (LD2) on successful PONG
-                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-                 }
+            // Copy to Main Loop Buffer if it's free
+            if (frame_ready_flag == 0) {
+                 memcpy(valid_frame_buf, rx_buffer, rx_index);
+                 valid_frame_len = rx_index;
+                 frame_ready_flag = 1;
             }
+            // Reset Accumulator
             rx_index = 0;
         }
     }
