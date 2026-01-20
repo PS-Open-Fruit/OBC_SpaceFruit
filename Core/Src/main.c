@@ -82,7 +82,7 @@ const osThreadAttr_t MainTask_attributes = {
 osThreadId_t USBTaskHandle;
 const osThreadAttr_t USBTask_attributes = {
   .name = "USBTask",
-  .stack_size = 3072 * 4,
+  .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for wdtFeed */
@@ -91,6 +91,13 @@ const osThreadAttr_t wdtFeed_attributes = {
   .name = "wdtFeed",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for sensorQuery */
+osThreadId_t sensorQueryHandle;
+const osThreadAttr_t sensorQuery_attributes = {
+  .name = "sensorQuery",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
@@ -105,6 +112,8 @@ const osMessageQueueAttr_t cdcDataQueue_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+#define COM_UART huart4
+#define EPS_UART huart2
 // usb_data_t usb_buff;
 
 /* USER CODE END PV */
@@ -127,6 +136,7 @@ static void MX_IWDG_Init(void);
 void mainTask(void *argument);
 void usbTask(void *argument);
 void wdtFeedTask(void *argument);
+void sensorQueryTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -218,6 +228,9 @@ int main(void)
 
   /* creation of wdtFeed */
   wdtFeedHandle = osThreadNew(wdtFeedTask, NULL, &wdtFeed_attributes);
+
+  /* creation of sensorQuery */
+  sensorQueryHandle = osThreadNew(sensorQueryTask, NULL, &sensorQuery_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -878,63 +891,23 @@ void mainTask(void *argument)
   /* Infinite loop */
   for (;;)
   {
-    // printf("Hello World\r\n");
-    // char buffer[50];
-    // uint32_t len = sprintf(buffer, "UART2\r\n");
-    // HAL_UART_Transmit(&huart2, buffer, len, 100);
-    // len = sprintf(buffer, "UART4\r\n");
-    // HAL_UART_Transmit(&huart4, buffer, len, 100);
-    // len = sprintf(buffer, "UART3\r\n");
-    // HAL_UART_Transmit(&huart3, buffer, len, 100);
-    // /* USER CODE BEGIN PV */
-    // CAN_TxHeaderTypeDef TxHeader;
-    // CAN_RxHeaderTypeDef RxHeader;
-    // uint32_t TxMailbox;
-    // uint8_t TxData[8];
-    // uint8_t RxData[8];
-    // /* USER CODE END PV */
-
-    // // ... (within your main application loop) ...
-
-    // /* Configure the message to transmit */
-    // TxHeader.StdId = 0x123;                // Standard Identifier (11-bit), e.g., 0x446
-    // // TxHeader.ExtId = 0x01;                 // Extended Identifier (not used in this standard example)
-    // TxHeader.RTR = CAN_RTR_DATA;           // Data frame, not remote transmission request
-    // TxHeader.IDE = CAN_ID_STD;             // Use standard ID
-    // TxHeader.DLC = 8;                      // Data Length Code: sending 2 data bytes
-    // TxHeader.TransmitGlobalTime = DISABLE; // Disable global time
-
-    // /* Load data into the TxData array */
-    // TxData[0] = 50;   // First byte of data
-    // TxData[1] = 0xAA; // Second byte of data
-    // TxData[2] = 50;   // First byte of data
-    // TxData[3] = 0xAA; // Second byte of data
-    // TxData[4] = 50;   // First byte of data
-    // TxData[5] = 0xAA; // Second byte of data
-    // TxData[6] = 50;   // First byte of data
-    // TxData[7] = 0xAA; // Second byte of data
-    // /* Request transmission */
-    // if (HAL_CAN_AddTxMessage(&hcan2, &TxHeader, TxData, &TxMailbox) != HAL_OK)
-    // {
-    //   printf("There's an Error Transmitting CAN\r\n");
-    //   /* Transmission request Error */
-    //   Error_Handler();
-    // }
-
     int32_t temp = 0;
     hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
-    if (ret != hal_ok)
-    {
+    if (ret != hal_ok){
       printf("Read Temperature Error");
     }
-    else
-    {
+    else{
       printf("Temperature : %ld\r\n", temp);
     }
 
     date_time_t datetime;
-    rv3028c7_read_time(&rtc, &datetime);
-    printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
+    ret = rv3028c7_read_time(&rtc, &datetime);
+    if (ret != hal_ok){
+      printf("Read RTC Error");
+    }
+    else{
+      printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
+    }
 
     printf("\r\n");
     osDelay(1000);
@@ -1000,6 +973,27 @@ void wdtFeedTask(void *argument)
     osDelay(400);
   }
   /* USER CODE END wdtFeedTask */
+}
+
+/* USER CODE BEGIN Header_sensorQueryTask */
+/**
+* @brief Function implementing the sensorQuery thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_sensorQueryTask */
+void sensorQueryTask(void *argument)
+{
+  /* USER CODE BEGIN sensorQueryTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    uint8_t data[50];
+    uint32_t len = sprintf((char*)data,"Hello World EPS\r\n");
+    HAL_UART_Transmit(&EPS_UART,data,len,1000);
+    osDelay(1000);
+  }
+  /* USER CODE END sensorQueryTask */
 }
 
 /**
