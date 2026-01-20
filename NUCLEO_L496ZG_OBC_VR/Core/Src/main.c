@@ -51,13 +51,18 @@
 UART_HandleTypeDef hlpuart1;
 
 /* USER CODE BEGIN PV */
-uint8_t rx_buffer[MAX_FRAME_SIZE];
-uint8_t rx_index = 0;
+// --- Buffer A: ISR Accumulator (High Priority) ---
+// Used exclusively by OBC_On_Receive() to build up incoming frames byte-by-byte.
+uint8_t isr_rx_buffer[MAX_FRAME_SIZE];
+uint8_t isr_rx_idx = 0;
 
-// Buffer for Main Loop processing (Safe from Interrupts)
-uint8_t valid_frame_buf[MAX_FRAME_SIZE];
-uint16_t valid_frame_len = 0;
-volatile uint8_t frame_ready_flag = 0;
+// --- Buffer B: Application Processor (Low Priority) ---
+// Safe copy of the frame for the main loop to process without blocking interrupts.
+uint8_t app_process_buffer[MAX_FRAME_SIZE];
+uint16_t app_process_len = 0;
+
+// Flag: 1 = Buffer B has data pending, 0 = Buffer B is empty/processed
+volatile uint8_t is_frame_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -327,14 +332,14 @@ uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
     return out_idx;
 }
 
-// --- Main Process Loop ---
+// --- Main Process Loop (Runs in while(1)) ---
 void OBC_Process_Loop(void) {
     static uint32_t last_tick = 0;
     
-    // 1. Process Received Packets (Moved out of ISR)
-    if (frame_ready_flag) {
+    // 1. Process Received Packets (Reading Buffer B)
+    if (is_frame_ready) {
         uint8_t decoded[128];
-        uint16_t dec_len = SLIP_Decode(valid_frame_buf, valid_frame_len, decoded);
+        uint16_t dec_len = SLIP_Decode(app_process_buffer, app_process_len, decoded);
         
         if (dec_len > 0) {
              printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
@@ -347,7 +352,8 @@ void OBC_Process_Loop(void) {
                  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
              }
         }
-        frame_ready_flag = 0; // Clear flag
+        // Mark Buffer B as empty, allowing ISR to fill it again
+        is_frame_ready = 0; 
     }
 
     // 2. Periodic Tasks
@@ -371,29 +377,38 @@ void OBC_Process_Loop(void) {
 }
 
 // --- Receive Handler (Called from usbd_cdc_if.c ISR) ---
+// This fills Buffer A (Accumulator) and copies to Buffer B when complete
 void OBC_On_Receive(uint8_t* Buf, uint32_t *Len) {
     for (uint32_t i = 0; i < *Len; i++) {
         uint8_t byte = Buf[i];
         
-        if (rx_index < MAX_FRAME_SIZE) {
-            rx_buffer[rx_index++] = byte;
+        // 1. Accumulate Byte in Buffer A
+        if (isr_rx_idx < MAX_FRAME_SIZE) {
+            isr_rx_buffer[isr_rx_idx++] = byte;
         }
         
-        // Sync: Reset if first byte isn't FEND
-        if (rx_index == 1 && byte != FEND) {
-            rx_index = 0; 
+        // 2. Sync Check: Reset if first byte isn't Start Marker (FEND)
+        if (isr_rx_idx == 1 && byte != FEND) {
+            isr_rx_idx = 0; 
         }
         
-        // End Flag Found
-        if (rx_index > 1 && byte == FEND) {
-            // Copy to Main Loop Buffer if it's free
-            if (frame_ready_flag == 0) {
-                 memcpy(valid_frame_buf, rx_buffer, rx_index);
-                 valid_frame_len = rx_index;
-                 frame_ready_flag = 1;
+        // 3. End of Frame Check
+        if (isr_rx_idx > 1 && byte == FEND) {
+            // Frame is complete. Try to move Buffer A -> Buffer B
+            
+            if (is_frame_ready == 0) {
+                 // Buffer B is free. Perform the Copy.
+                 memcpy(app_process_buffer, isr_rx_buffer, isr_rx_idx);
+                 app_process_len = isr_rx_idx;
+                 
+                 // Signal Main Loop
+                 is_frame_ready = 1;
             }
-            // Reset Accumulator
-            rx_index = 0;
+            // else: Buffer B is still busy being processed by Main Loop.
+            // We drop this frame to prevent data corruption.
+            
+            // Reset Buffer A Index for next frame
+            isr_rx_idx = 0;
         }
     }
 }
