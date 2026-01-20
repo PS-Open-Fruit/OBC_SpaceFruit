@@ -22,7 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdio.h"
+#include "usbd_cdc_if.h"
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +34,12 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#define FEND  0xC0
+#define FESC  0xDB
+#define TFEND 0xDC
+#define TFESC 0xDD
+#define MAX_FRAME_SIZE 128
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,7 +51,8 @@
 UART_HandleTypeDef hlpuart1;
 
 /* USER CODE BEGIN PV */
-
+uint8_t rx_buffer[MAX_FRAME_SIZE];
+uint8_t rx_index = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -52,7 +60,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer);
+uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload);
+void OBC_Process_Loop(void);
+void OBC_On_Receive(uint8_t* Buf, uint32_t *Len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -99,6 +110,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    OBC_Process_Loop();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -258,7 +270,112 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+// For printf() via STLink
+int _write(int file, char *ptr, int len)
+{
+  HAL_UART_Transmit(&hlpuart1, (uint8_t *)ptr, len, 0xFFFF);
+  return len;
+}
 
+// --- SLIP Encoder ---
+uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer) {
+    uint16_t idx = 0;
+    out_buffer[idx++] = FEND;
+    out_buffer[idx++] = 0x00; // Header
+    
+    for (uint16_t i = 0; i < len; i++) {
+        uint8_t c = payload[i];
+        if (c == FEND) {
+            out_buffer[idx++] = FESC;
+            out_buffer[idx++] = TFEND;
+        } else if (c == FESC) {
+            out_buffer[idx++] = FESC;
+            out_buffer[idx++] = TFESC;
+        } else {
+            out_buffer[idx++] = c;
+        }
+    }
+    out_buffer[idx++] = FEND;
+    return idx;
+}
+
+// --- SLIP Decoder ---
+uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
+    if (len < 3) return 0;
+    if (frame[0] != FEND || frame[len-1] != FEND) return 0;
+    if (frame[1] != 0x00) return 0; // Invalid Header
+    
+    uint16_t out_idx = 0;
+    for (uint16_t i = 2; i < len - 1; i++) {
+        uint8_t c = frame[i];
+        if (c == FESC) {
+            i++;
+            if (i >= len - 1) return 0; // Error
+            if (frame[i] == TFEND) out_payload[out_idx++] = FEND;
+            else if (frame[i] == TFESC) out_payload[out_idx++] = FESC;
+        } else {
+            out_payload[out_idx++] = c;
+        }
+    }
+    return out_idx;
+}
+
+// --- Main Process Loop ---
+void OBC_Process_Loop(void) {
+    static uint32_t last_tick = 0;
+    
+    // Every 2 seconds, ping the Payload
+    if (HAL_GetTick() - last_tick > 2000) {
+        last_tick = HAL_GetTick();
+        
+        // Prepare Payload Ping Command (0x10)
+        uint8_t cmd_payload[1] = {0x10};
+        uint8_t tx_frame[32];
+        
+        uint16_t len = SLIP_Encode(cmd_payload, 1, tx_frame);
+        
+        // Send via USB (Nucleo -> RPi)
+        if (CDC_Transmit_FS(tx_frame, len) == USBD_OK) {
+            printf("[OBC] Sent PING (0x10) to Payload via USB\r\n");
+        } else {
+            printf("[OBC] Failed to send USB packet (Busy/Error)\r\n");
+        }
+    }
+}
+
+// --- Receive Handler (Called from usbd_cdc_if.c) ---
+void OBC_On_Receive(uint8_t* Buf, uint32_t *Len) {
+    for (uint32_t i = 0; i < *Len; i++) {
+        uint8_t byte = Buf[i];
+        
+        if (rx_index < MAX_FRAME_SIZE) {
+            rx_buffer[rx_index++] = byte;
+        }
+        
+        if (rx_index == 1 && byte != FEND) {
+            rx_index = 0; 
+        }
+        
+        if (rx_index > 1 && byte == FEND) {
+            uint8_t decoded[128];
+            uint16_t dec_len = SLIP_Decode(rx_buffer, rx_index, decoded);
+            
+            if (dec_len > 0) {
+                 printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
+                 for(int k=0; k<dec_len; k++) printf("%02X ", decoded[k]);
+                 printf("\r\n");
+
+                 // Check for PONG response
+                 if (dec_len == 4 && strncmp((char*)decoded, "PONG", 4) == 0) {
+                     printf("[OBC] >> PONG Received! Link Active.\r\n");
+                     // Toggle Green LED (LD2) on successful PONG
+                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                 }
+            }
+            rx_index = 0;
+        }
+    }
+}
 /* USER CODE END 4 */
 
 /**
