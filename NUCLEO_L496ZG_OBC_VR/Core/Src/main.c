@@ -39,7 +39,7 @@
 #define FESC  0xDB
 #define TFEND 0xDC
 #define TFESC 0xDD
-#define MAX_FRAME_SIZE 128
+#define MAX_FRAME_SIZE 512 // Increased for Image Chunks
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -98,7 +98,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  setvbuf(stdout, NULL, _IONBF, 0); // Disable buffering for printf
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -113,7 +113,7 @@ int main(void)
   MX_LPUART1_UART_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-
+  printf("[OBC] System Booted. VCP Active.\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -335,21 +335,82 @@ uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
 // --- Main Process Loop (Runs in while(1)) ---
 void OBC_Process_Loop(void) {
     static uint32_t last_tick = 0;
+    static uint16_t next_chunk_to_req = 0;
+    static uint8_t download_active = 0;
     
     // 1. Process Received Packets (Reading Buffer B)
     if (is_frame_ready) {
-        uint8_t decoded[128];
+        uint8_t decoded[512]; // Increased buffer size
         uint16_t dec_len = SLIP_Decode(app_process_buffer, app_process_len, decoded);
         
         if (dec_len > 0) {
-             printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
-             for(int k=0; k<dec_len; k++) printf("%02X ", decoded[k]);
-             printf("\r\n");
-
-             // Check for PONG response
+             uint8_t cmd_id = decoded[0];
+             
+             // Check for PONG (0x10 is Ping, typically Payload replies with raw PONG string if configured that way, 
+             // but let's assume standard framing. The PONG string detection remains for legacy test)
              if (dec_len == 4 && strncmp((char*)decoded, "PONG", 4) == 0) {
                  printf("[OBC] >> PONG Received! Link Active.\r\n");
                  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+             }
+             // Handle Image Capture Response (0x12)
+             else if (cmd_id == 0x12) {
+                 // Format: [0x12] [ImgID:2] [Size:4]
+                 uint32_t img_size;
+                 memcpy(&img_size, &decoded[3], 4);
+                 printf("[OBC] Image Captured! Size: %lu bytes. Starting Download...\r\n", img_size);
+                 
+                 // Start Downloading
+                 download_active = 1;
+                 next_chunk_to_req = 0;
+
+                 // Kickstart download immediately
+                 uint8_t req[3] = {0x13, 0x00, 0x00};
+                 uint8_t tx_frame[16];
+                 uint16_t len = SLIP_Encode(req, 3, tx_frame);
+                 CDC_Transmit_FS(tx_frame, len);
+             }
+             // Handle Image Chunk (0x13)
+             else if (cmd_id == 0x13) {
+                 // Format: [0x13] [ChunkID:2] [Data...]
+                 uint16_t chunk_id;
+                 memcpy(&chunk_id, &decoded[1], 2);
+                 uint16_t data_len = dec_len - 3;
+                 uint8_t* raw_data = &decoded[3];
+                 
+                 if (chunk_id == next_chunk_to_req) {
+                     // Toggle LED for Visual Feedback
+                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+                     // PRINT HEX DATA FOR PC SCRIPT
+                     // Format: "[DATA] A1 B2 C3 ..."
+                     printf("[DATA] ");
+                     for(int k=0; k<data_len; k++) printf("%02X ", raw_data[k]);
+                     printf("\r\n");
+                     
+                     // Advance
+                     next_chunk_to_req++;
+                     
+                     // Stop condition (Empty chunk or small chunk means EOF)
+                     if (data_len < 200) { 
+                         printf("[OBC] Download Complete!\r\n");
+                         download_active = 0;
+                     } else {
+                         // FAST REQUEST NEXT CHUNK
+                         uint8_t req[3];
+                         req[0] = 0x13;
+                         req[1] = next_chunk_to_req & 0xFF;
+                         req[2] = (next_chunk_to_req >> 8) & 0xFF;
+                         
+                         uint8_t tx_frame[16];
+                         uint16_t len = SLIP_Encode(req, 3, tx_frame);
+                         CDC_Transmit_FS(tx_frame, len);
+                     }
+                 }
+             }
+             else {
+                 printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
+                 for(int k=0; k<dec_len; k++) printf("%02X ", decoded[k]);
+                 printf("\r\n");
              }
         }
         // Mark Buffer B as empty, allowing ISR to fill it again
@@ -357,21 +418,20 @@ void OBC_Process_Loop(void) {
     }
 
     // 2. Periodic Tasks
-    // Every 2 seconds, ping the Payload
-    if (HAL_GetTick() - last_tick > 2000) {
+    // Every 5 seconds, Trigger Image Capture (Demo)
+    if (HAL_GetTick() - last_tick > 5000) {
         last_tick = HAL_GetTick();
         
-        // Prepare Payload Ping Command (0x10)
-        uint8_t cmd_payload[1] = {0x10};
-        uint8_t tx_frame[32];
-        
-        uint16_t len = SLIP_Encode(cmd_payload, 1, tx_frame);
-        
-        // Send via USB (Nucleo -> RPi)
-        if (CDC_Transmit_FS(tx_frame, len) == USBD_OK) {
-            printf("[OBC] Sent PING (0x10) to Payload via USB\r\n");
-        } else {
-            printf("[OBC] Failed to send USB packet (Busy/Error)\r\n");
+        // Heartbeat LED (Red)
+        HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+
+        // Only trigger new capture if not currently downloading
+        if (!download_active) {
+             uint8_t cmd_capture[1] = {0x12};
+             uint8_t tx_frame[32];
+             uint16_t len = SLIP_Encode(cmd_capture, 1, tx_frame);
+             CDC_Transmit_FS(tx_frame, len);
+             printf("[OBC] Triggering Capture...\r\n");
         }
     }
 }
