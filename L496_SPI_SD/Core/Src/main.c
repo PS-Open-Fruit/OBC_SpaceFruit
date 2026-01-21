@@ -196,7 +196,25 @@ int main(void)
     f_close(&fil);
     printf("close complete\r\n");
 
+    // --- Verify Write ---
+    printf("Verifying write...\r\n");
+    fres = f_open(&fil, "write.txt", FA_READ);
+    if (fres == FR_OK) {
+        memset(workBuffer, 0, sizeof(workBuffer)); // Clear buffer
+        TCHAR* rres = f_gets((TCHAR*)workBuffer, 512, &fil);
+        if(rres != 0) {
+            printf("Read back from 'write.txt': %s\r\n", workBuffer);
+        } else {
+            printf("f_gets on write.txt failed\r\n");
+        }
+        f_close(&fil);
+    } else {
+        printf("Failed to open 'write.txt' for verification (Error %i)\r\n", fres);
+    }
+    // --------------------
+
     //We're done, so de-mount the drive
+    HAL_Delay(100);
     f_mount(NULL, "", 0);
     printf("unmount complete\r\n");
   /* USER CODE END 2 */
