@@ -106,11 +106,34 @@ int main(void)
     FIL fil; 		//File handle
     FRESULT fres; //Result after operations
 
+    //Buffer for f_mkfs work area and file reading
+    //Must be at least the size of one sector (512 bytes) for f_mkfs
+    BYTE workBuffer[512];
+
     //Open the file system
     fres = f_mount(&FatFs, "", 1); //1=mount now
     if (fres != FR_OK) {
-  	printf("f_mount error (%i)\r\n", fres);
-  	while(1);
+  	    printf("f_mount error (%i)\r\n", fres);
+        if (fres == FR_NO_FILESYSTEM) {
+            printf("No valid FAT filesystem found. Attempting to format to FAT32...\r\n");
+            //Format the card. FM_ANY will choose FAT32 for 64GB usually.
+            fres = f_mkfs("", FM_ANY, 0, workBuffer, sizeof(workBuffer));
+            if (fres == FR_OK) {
+                printf("Format successful! Remounting...\r\n");
+                fres = f_mount(&FatFs, "", 1);
+                if (fres == FR_OK) {
+                    printf("Remount successful!\r\n");
+                } else {
+                    printf("Remount failed error (%i)\r\n", fres);
+                    while(1);
+                }
+            } else {
+                printf("Format failed error (%i)\r\n", fres);
+                while(1);
+            }
+        } else {
+  	        while(1);
+        }
     }
 
     //Let's get some statistics from the SD card
@@ -133,25 +156,23 @@ int main(void)
     //Now let's try to open file "test.txt"
     fres = f_open(&fil, "test.txt", FA_READ);
     if (fres != FR_OK) {
-  	printf("f_open error (%i)\r\n", fres);
-  	while(1);
-    }
-    printf("I was able to open 'test.txt' for reading!\r\n");
-
-    //Read 30 bytes from "test.txt" on the SD card
-    BYTE readBuf[30];
-
-    //We can either use f_read OR f_gets to get data out of files
-    //f_gets is a wrapper on f_read that does some string formatting for us
-    TCHAR* rres = f_gets((TCHAR*)readBuf, 30, &fil);
+  	    //If file doesn't exist (e.g. after format), just print and continue
+        printf("Could not open 'test.txt' for reading (Error %i). Skipping read test.\r\n", fres);
+    } else {
+        printf("I was able to open 'test.txt' for reading!\r\n");
+    
+        //We can either use f_read OR f_gets to get data out of files
+        //f_gets is a wrapper on f_read that does some string formatting for us
+        TCHAR* rres = f_gets((TCHAR*)workBuffer, 512, &fil);
     if(rres != 0) {
-  	printf("Read string from 'test.txt' contents: %s\r\n", readBuf);
+  	printf("Read string from 'test.txt' contents: %s\r\n", workBuffer);
     } else {
   	printf("f_gets error (%i)\r\n", fres);
     }
 
     //Be a tidy kiwi - don't forget to close your file!
     f_close(&fil);
+    }
 
     //Now let's try and write a file "write.txt"
     fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
@@ -162,9 +183,9 @@ int main(void)
     }
 
     //Copy in a string
-    strncpy((char*)readBuf, "a new file is made!", 19);
+    snprintf((char*)workBuffer, 512, "a new file is made!");
     UINT bytesWrote;
-    fres = f_write(&fil, readBuf, 19, &bytesWrote);
+    fres = f_write(&fil, workBuffer, 19, &bytesWrote);
     if(fres == FR_OK) {
   	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
     } else {
@@ -173,9 +194,11 @@ int main(void)
 
     //Be a tidy kiwi - don't forget to close your file!
     f_close(&fil);
+    printf("close complete\r\n");
 
     //We're done, so de-mount the drive
     f_mount(NULL, "", 0);
+    printf("unmount complete\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */

@@ -27,11 +27,14 @@
 //#include "stm32f3xx_hal.h" /* Provide the low-level HAL functions */
 #include "stm32l4xx_hal.h"
 #include "user_diskio_spi.h"
+#include "main.h"
+#include <stdio.h>
 
 //Make sure you set #define SD_SPI_HANDLE as some hspix in main.h
 //Make sure you set #define SD_CS_GPIO_Port as some GPIO port in main.h
 //Make sure you set #define SD_CS_Pin as some GPIO pin in main.h
-extern SPI_HandleTypeDef SD_SPI_HANDLE;
+extern SPI_HandleTypeDef hspi1;
+#define SD_SPI_HANDLE hspi1
 
 /* Function prototypes */
 
@@ -356,7 +359,7 @@ inline DSTATUS USER_SPI_initialize (
 			} else {
 				printf("SD: VCC Check Failed. OCR[2]=%02X OCR[3]=%02X\r\n", ocr[2], ocr[3]);
 			}
-	} else {	/* Not SDv2 card */
+		} else {	/* Not SDv2 card */
 			printf("SD: CMD8 Failed (Ret: %02X). Not SDv2. Trying SDv1/MMC.\r\n", res_cmd8);
 			
 			BYTE res_acmd41 = send_cmd(ACMD41, 0);
