@@ -60,8 +60,6 @@ class RPiVRSimulator:
         self.running = False
         
         # State
-        self.switches = [0] * 6
-        self.payload_powered = True # Assume ON if script is running on the Pi
         self.img_counter = 0
         self.last_captured_file = None
         self.last_file_size = 0
@@ -159,33 +157,8 @@ class RPiVRSimulator:
         if cmd_id != 0x13:
             print(f"Cmd: 0x{cmd_id:02X}")
 
-        # --- EPS SIMULATION ---
-        if cmd_id == 0x01: # Solar
-            ch = payload[1] if len(payload)>1 else 0
-            resp = struct.pack("<hhB", random.randint(3800, 4100), random.randint(50, 600), ch)
-        
-        elif cmd_id == 0x02: # Output
-            ch = payload[1] if len(payload)>1 else 0
-            on = self.switches[ch] if ch < 6 else 0
-            resp = struct.pack("<HHB", 5000 if on else 0, 150 if on else 0, ch)
-            
-        elif cmd_id == 0x03: # Switch Status
-            ch = payload[1]
-            on = self.switches[ch] if ch < 6 else 0
-            resp = struct.pack("<BB", on, ch)
-            
-        elif cmd_id == 0x04: # Batt Temp
-            ch = payload[1]
-            resp = struct.pack("<fB", 25.0 + random.random(), ch)
-            
-        elif cmd_id == 0x05: # Set Switch
-            ch = payload[1]
-            state = payload[2]
-            if ch < 6: self.switches[ch] = state
-            resp = struct.pack("<BBB", 0x88, state, ch)
-
         # --- PAYLOAD SIMULATION (Actual Pi Data) ---
-        elif cmd_id == 0x10: # Ping
+        if cmd_id == 0x10: # Ping
             resp = b'PONG'
             
         elif cmd_id == 0x11: # Status
