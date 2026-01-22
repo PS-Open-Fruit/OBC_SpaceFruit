@@ -118,10 +118,21 @@ osMessageQueueId_t epsUartQueueHandle;
 const osMessageQueueAttr_t epsUartQueue_attributes = {
   .name = "epsUartQueue"
 };
+/* Definitions for epsFlag */
+osEventFlagsId_t epsFlagHandle;
+const osEventFlagsAttr_t epsFlag_attributes = {
+  .name = "epsFlag"
+};
 /* USER CODE BEGIN PV */
 
 #define COM_UART huart4
 #define EPS_UART huart2
+
+#define EVENT_FLAG_ERROR        0x80000000U
+#define EPS_FLAG_POLL_START     0x00000001U
+#define EPS_FLAG_POLL_SUCCESS   0x00000002U 
+#define EPS_FLAG_POLL_ERROR     0x00000004U
+
 // usb_data_t usb_buff;
 
 /* USER CODE END PV */
@@ -246,6 +257,10 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
+
+  /* Create the event(s) */
+  /* creation of epsFlag */
+  epsFlagHandle = osEventFlagsNew(&epsFlag_attributes);
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
@@ -827,15 +842,16 @@ PUTCHAR_PROTOTYPE
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-  if (huart == &EPS_UART)
-  {
-    // printf("callback index : %u\r\n",Size);
-    osMessageQueuePut(epsUartQueueHandle, (void *)&Size, 0, 0);
-    // osSemaphoreRelease(epsDataSemHandle);
-  }
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+  if (huart == &EPS_UART)
+  {
+    uint8_t ready = 1;
+    // printf("callback index : %u\r\n",Size);
+    // osSemaphoreRelease(epsDataSemHandle);
+    osMessageQueuePut(epsUartQueueHandle, (void *)&ready, 0, 0);
+  }
 
 }
 
@@ -942,6 +958,14 @@ void mainTask(void *argument)
     {
       printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
     }
+        // 1. Send Query
+    uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
+    HAL_UART_Transmit_DMA(&EPS_UART, queryData, 4);
+    osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
+    uint32_t flagStatus = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS,osFlagsWaitAny,500);
+    if (flagStatus == EVENT_FLAG_ERROR){
+      printf("Wait Flag Error\r\n");
+    }
 
     printf("\r\n");
     osDelay(1000);
@@ -1023,28 +1047,63 @@ void sensorQueryTask(void *argument)
   /* Defines */
 
   // --- RE-ASSEMBLY BUFFER (The "State Machine") ---
-  static uint8_t frame_buf[EPS_RECV_LEN];
-  static uint8_t eps_recv_buf[EPS_RECV_LEN];
-  uint8_t eps_recv_queue = 0;
-  static uint16_t frame_idx = 0;
+  uint8_t frame_buf[EPS_RECV_LEN];
+  uint8_t frame_index = 0;
+  uint8_t eps_recv_buf = 0;
+  uint8_t eps_recv_ready = 0;
 
-  /* Start DMA in Circular Mode ONCE */
-  HAL_UART_Receive_DMA(&EPS_UART, eps_recv_buf, 1);
+  typedef enum{
+    NO_MSG,
+    FOUND_FRAME,
+  } rx_state;
+  rx_state state = NO_MSG;
 
-  /* Variables for processing */
-  uint8_t process_buf[EPS_RECV_LEN]; // Temp buffer to assemble linear frame
   printf("Sensor Query Starts\r\n");
   for (;;)
   {
-    // 1. Send Query
-    uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
-    HAL_UART_Transmit_DMA(&EPS_UART, queryData, 4);
 
-    // 2. Wait for response (Wait 500ms max, or however long your device takes to reply)
-    osStatus_t os_ret = osMessageQueueGet(epsUartQueueHandle, &eps_recv_queue, NULL, 500);
+    osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsNoClear,osWaitForever);
+    HAL_UART_Receive_DMA(&EPS_UART, &eps_recv_buf, 1);
+
+    // 2. Wait for response (Wait 1000ms max, or however long your device takes to reply)
+    osStatus_t os_ret = osMessageQueueGet(epsUartQueueHandle, &eps_recv_ready, NULL, 1000);
+
+    if (os_ret == osOK){
+      frame_buf[frame_index++] = eps_recv_buf;
+      if (eps_recv_buf == FEND){
+        if (state == NO_MSG){
+          state = FOUND_FRAME;
+        }
+        else if (state == FOUND_FRAME){
+          osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
+          osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_SUCCESS);
+          state = NO_MSG;
+          // for (int i = 0; i < frame_index;i++){
+          //   printf("0x%02X ",frame_buf[i]);
+          // }
+          // printf("\r\n");
+          frame_index = 0;
+        }
+      }
+    }
+
+    if (os_ret == osErrorTimeout){
+      // printf("EPS Timeout - ");
+      if (state == NO_MSG){
+        osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
+        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+        // printf("No Response");
+      }
+      else if (state == FOUND_FRAME){
+        osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
+        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+        // printf("Message Break");
+      }
+      // printf("\r\n");
+    }
 
     // Optional: Delay before next query
-    osDelay(500);
+    // osDelay(500);
   }
   /* USER CODE END sensorQueryTask */
 }
