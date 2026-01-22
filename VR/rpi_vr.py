@@ -64,6 +64,7 @@ class RPiVRSimulator:
         self.payload_powered = True # Assume ON if script is running on the Pi
         self.img_counter = 0
         self.last_captured_file = None
+        self.last_file_size = 0
 
     def capture_real_image(self, img_id):
         """Captures a real JPEG using rpicam-still."""
@@ -85,7 +86,8 @@ class RPiVRSimulator:
             
             if os.path.exists(filename):
                 self.last_captured_file = filename
-                return os.path.getsize(filename)
+                self.last_file_size = os.path.getsize(filename)
+                return self.last_file_size
         except subprocess.TimeoutExpired:
             print("   ❌ Camera Timed Out!")
         except Exception as e:
@@ -154,7 +156,8 @@ class RPiVRSimulator:
         cmd_id = payload[0]
         resp = b''
 
-        print(f"Cmd: 0x{cmd_id:02X}")
+        if cmd_id != 0x13:
+            print(f"Cmd: 0x{cmd_id:02X}")
 
         # --- EPS SIMULATION ---
         if cmd_id == 0x01: # Solar
@@ -210,6 +213,17 @@ class RPiVRSimulator:
             if len(payload) >= 3 and self.last_captured_file:
                 chunk_id = struct.unpack("<H", payload[1:3])[0]
                 CHUNK_SIZE = 200
+                
+                # Show progress
+                if self.last_file_size > 0:
+                    total_chunks = (self.last_file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+                    percent = (chunk_id / total_chunks) * 100
+                    # Print progress bar every 5 chunks to reduce I/O or if it's the last one
+                    if chunk_id % 5 == 0 or chunk_id >= total_chunks - 1:
+                        print(f"   📡 Transferring: {percent:.1f}% (Chunk {chunk_id}/{total_chunks})", end='\r')
+                        if chunk_id >= total_chunks - 1:
+                            print() # Newline at end
+
                 offset = chunk_id * CHUNK_SIZE
                 
                 try:
