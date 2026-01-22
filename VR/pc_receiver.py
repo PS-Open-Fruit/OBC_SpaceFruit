@@ -4,6 +4,17 @@ import time
 import sys
 import os
 
+# Import KISS Protocol
+current_dir = os.path.dirname(os.path.abspath(__file__))
+shared_path = os.path.join(os.path.dirname(current_dir), 'Shared', 'Python')
+if shared_path not in sys.path:
+    sys.path.append(shared_path)
+try:
+    from kiss_protocol import KISSProtocol
+except ImportError:
+    print("❌ Error: Could not import KISSProtocol.")
+    sys.exit(1)
+
 # ==========================================
 # 1. Config
 # ==========================================
@@ -17,26 +28,30 @@ if not os.path.exists(DOWNLOAD_DIR):
 # ==========================================
 # 2. Ground Station Class
 # ==========================================
-
 class GroundStation:
-    def __init__(self, port, baudrate):
+    def __init__(self, port='COM9', baud=9600):
         self.port = port
-        self.baudrate = baudrate
+        self.baud = baud
         self.ser = None
-        self.running = False
+        self.running = True
         
-        # Download State
-        self.downloading = False
+        # Image Transfer State
         self.current_img_data = bytearray()
         self.expected_size = 0
+        self.downloading = False
         self.start_time = 0
+        
+        # RX State Machine buffers
+        self.log_buffer = bytearray()
+        self.kiss_buffer = bytearray()
+        self.in_frame = False
 
     def start(self):
-        """Starts the Ground Station (Connection + Threads)."""
+        print(f"Connecting to {self.port} at {self.baud} baud...")
         try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
-            self.running = True
-            print(f"✅ GS Connected to {self.port} @ {self.baudrate}")
+            self.ser = serial.Serial(self.port, self.baud, timeout=0.1)
+            time.sleep(2) # Wait for reset
+            print("✅ Connected!")
         except Exception as e:
             print(f"❌ Connection Failed: {e}")
             return
@@ -81,41 +96,80 @@ class GroundStation:
                     
                 elif cmd in ['c', 'capture']:
                     self.send_telecommand('c')
-
-                elif cmd == '':
-                    pass
-                else:
-                    self.send_telecommand(cmd)
+                    print("REQUESTED CAPTURE...")
 
             except KeyboardInterrupt:
                 self.running = False
                 break
-        
-        if self.ser: self.ser.close()
 
     def listen_loop(self):
-        """Background thread to handle incoming Telemetry/Data."""
-        print("   [RX] Listener started...")
+        """
+        Main RX Loop.
+        Parses stream for:
+        1. Plain ASCII logs (outside KISS frames)
+        2. KISS Frames (Image Data)
+        """
+        print("🎧 Listening for Telemetry...")
         
-        while self.running:
+        while self.running and self.ser.is_open:
             try:
-                if self.ser.in_waiting > 0:
-                    try:
-                        line = self.ser.readline()
-                        if not line: continue
+                # Read 1 byte at a time for precise state machine
+                byte = self.ser.read(1)
+                
+                if not byte:
+                    continue
+                
+                b = byte[0] # Get int value
+                
+                if b == KISSProtocol.FEND:
+                    if self.in_frame:
+                        # End of Frame
+                        if len(self.kiss_buffer) > 0:
+                            self.process_kiss_frame(self.kiss_buffer)
+                        self.kiss_buffer = bytearray() # Reset
+                        self.in_frame = False
+                    else:
+                        # Start of Frame
+                        self.in_frame = True
+                        self.kiss_buffer = bytearray()
                         
-                        # Use ignore to handle binary data mixed with text
-                        text = line.decode('utf-8', errors='ignore').strip()
-                        self.process_telemetry(text)
-                        
-                    except UnicodeDecodeError:
-                        pass # Ignore noisy binary frame errors
+                elif self.in_frame:
+                    self.kiss_buffer.append(b)
+                    
+                else:
+                    # Not in frame -> ASCII Log processing
+                    if b == 0x0A: # Newline
+                         text = self.log_buffer.decode('utf-8', errors='ignore').strip()
+                         self.process_log_line(text)
+                         self.log_buffer = bytearray()
+                    elif b >= 0x20 or b == 0x0D: # Printable or CR
+                         # Ignore CR, append printable
+                         if b != 0x0D:
+                            self.log_buffer.append(b)
+            
             except Exception as e:
                 print(f"RX Error: {e}")
                 time.sleep(1)
 
-    def process_telemetry(self, text):
-        """Parses incoming text lines from OBC."""
+    def process_kiss_frame(self, escaped_data):
+        """Unescapes and handles KISS payload."""
+        payload = KISSProtocol.unescape(escaped_data)
+        
+        if len(payload) == 0: return
+        
+        # Check Command Byte (SLIP_Encode in C adds 0x00 at start)
+        cmd_byte = payload[0]
+        data = payload[1:]
+        
+        if cmd_byte == 0x00 and len(data) > 0:
+             # This is Image Data
+             self.current_img_data.extend(data)
+             self.print_progress()
+
+    def process_log_line(self, text):
+        """Parses ASCII log lines."""
+        if not text: return
+        
         # 1. Detect Start of Download
         if "[OBC] Image Captured! Size:" in text:
             try:
@@ -129,18 +183,7 @@ class GroundStation:
             except:
                 print(f"⚠️ Header Parse Error: {text}")
 
-        # 2. Detect Data Chunk
-        elif text.startswith("[DATA]"):
-            try:
-                hex_str = text.split("]", 1)[1].strip() # Safer split
-                chunk_bytes = bytes.fromhex(hex_str)
-                self.current_img_data.extend(chunk_bytes)
-                
-                self.print_progress()
-            except ValueError:
-                pass # Corrupt hex
-
-        # 3. Detect End of Download
+        # 2. Detect End of Download
         elif "[OBC] Download Complete!" in text:
             filename = os.path.join(DOWNLOAD_DIR, f"img_{int(time.time())}.jpg")
             with open(filename, "wb") as f:
@@ -153,10 +196,9 @@ class GroundStation:
             
             self.downloading = False
 
-        # 4. Standard Logs
-        elif text:
-            # Don't clutter UI while downloading unless it's an error
-            if not self.downloading or "Error" in text:
+        # 3. Standard Logs
+        else:
+            if not self.downloading:
                 print(f"   [OBC] {text}")
 
     def print_progress(self):
