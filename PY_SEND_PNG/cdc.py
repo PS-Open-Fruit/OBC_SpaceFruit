@@ -118,7 +118,7 @@ def send_file(serial_port, file_path):
 
 def main():
     # 1. Port Selection (Hardcoded to COM3)
-    selected_port = 'COM3'
+    selected_port = 'COM7'
     print(f"Using Port: {selected_port}")
 
     # 3. Send File directly

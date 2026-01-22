@@ -266,16 +266,32 @@ int main(void)
              printf("\r\nEnd of transmission (Timeout). Closing file.\r\n");
              f_close(&fil);
              
-             // Calc Speed
-             uint32_t endTime = HAL_GetTick();
-             uint32_t duration_ms = endTime - startTime;
-             if (duration_ms == 0) duration_ms = 1;
-             uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
-             printf("Received: %lu bytes\r\n", totalBytesReceived);
-             printf("Speed: %lu.%02lu KB/s\r\n", (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
-             
-             break; // Exit Experiment Loop
-         }
+              // Calc Speed
+              uint32_t endTime = HAL_GetTick();
+              uint32_t duration_ms = endTime - startTime;
+              if (duration_ms == 0) duration_ms = 1;
+              uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
+              printf("Duration: %lu ms\r\n", duration_ms);
+              printf("Received: %lu bytes\r\n", totalBytesReceived);
+              printf("Speed: %lu.%02lu KB/s\r\n", (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
+              
+              // --- Save Log to SD Card ---
+              FIL logFile;
+              if(f_open(&logFile, "log.txt", FA_OPEN_APPEND | FA_WRITE) == FR_OK) {
+                  char logBuf[128];
+                  int len = snprintf(logBuf, sizeof(logBuf), "Tick:%lu, File:%s, Size:%lu B, Time:%lu ms, Speed:%lu.%02lu KB/s\r\n", 
+                                     HAL_GetTick(), currentFilename, totalBytesReceived, duration_ms, (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
+                  
+                  UINT bw_log;
+                  f_write(&logFile, logBuf, len, &bw_log);
+                  f_close(&logFile);
+                  printf("Log saved to log.txt\r\n");
+              } else {
+                  printf("Failed to open log.txt\r\n");
+              }
+
+              break; // Exit Experiment Loop
+          }
          
          // Process Buffer A
          if(Buffer_A_Ready) {
@@ -587,7 +603,14 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+PUTCHAR_PROTOTYPE
+{
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the USART1 and Loop until the end of transmission */
+  HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
 
+  return ch;
+}
 /* USER CODE END 4 */
 
 /**
