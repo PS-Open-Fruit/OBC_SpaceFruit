@@ -38,6 +38,7 @@ class GroundStation:
         
         # Image Transfer State
         self.current_img_data = bytearray()
+        self.received_chunk_ids = set() # Track unique chunks
         self.expected_size = 0
         self.downloading = False
         self.start_time = 0
@@ -181,6 +182,14 @@ class GroundStation:
         # Extract Data
         # ChunkID (2 bytes)
         chunk_id = data_to_check[0] | (data_to_check[1] << 8)
+        
+        # Deduplication Check
+        if chunk_id in self.received_chunk_ids:
+             # We already have this chunk. Ignore to prevent >100% size or corruption.
+             return
+
+        self.received_chunk_ids.add(chunk_id)
+        
         img_chunk = data_to_check[2:]
         
         # Append
@@ -200,6 +209,7 @@ class GroundStation:
                 
                 self.downloading = True
                 self.current_img_data = bytearray()
+                self.received_chunk_ids = set() # Reset tracker
                 self.start_time = time.time()
             except:
                 print(f"⚠️ Header Parse Error: {text}")

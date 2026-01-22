@@ -446,15 +446,22 @@ void OBC_Process_Loop(void) {
                      payload_buffer[current_payload_len++] = (crc_hw >> 24) & 0xFF;
 
                      // 3. Encode (Escapes + FENDs)
+                     // Packet Format: [FEND] [0x00] [Escaped Payload] [FEND]
+                     // Payload Format: [ChunkID:2] [Data:N] [CRC:4]
                      uint8_t kiss_tx_buffer[1200];
                      uint16_t kiss_len = SLIP_Encode(payload_buffer, current_payload_len, kiss_tx_buffer);
                      
                      HAL_UART_Transmit(&hlpuart1, kiss_tx_buffer, kiss_len, 2000);
+                     
+                     // Advance Counter
+                     next_chunk_to_req++;
+
+                     // Stop condition (Empty chunk or small chunk means EOF)
                      if (data_len < 200) { 
                          printf("[OBC] Download Complete!\r\n");
                          download_active = 0;
                      } else {
-                         // FAST REQUEST NEXT CHUNK
+                         // REQ NEXT CHUNK
                          uint8_t req[3];
                          req[0] = 0x13;
                          req[1] = next_chunk_to_req & 0xFF;
