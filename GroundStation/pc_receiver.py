@@ -139,17 +139,8 @@ class GroundStation:
                         
                 elif self.in_frame:
                     self.kiss_buffer.append(b)
-                    
-                else:
-                    # Not in frame -> ASCII Log processing
-                    if b == 0x0A: # Newline
-                         text = self.log_buffer.decode('utf-8', errors='ignore').strip()
-                         self.process_log_line(text)
-                         self.log_buffer = bytearray()
-                    elif b >= 0x20 or b == 0x0D: # Printable or CR
-                         # Ignore CR, append printable
-                         if b != 0x0D:
-                            self.log_buffer.append(b)
+                
+                # Ignore raw bytes outside frames (No Raw Text allowed)
             
             except Exception as e:
                 print(f"RX Error: {e}")
@@ -159,12 +150,18 @@ class GroundStation:
         """Unescapes and handles KISS payload."""
         payload = KISSProtocol.unescape(escaped_data)
         
-        # Space Ready Format (CRC-32): [CMD:1] [ChunkID:2] [Data:N] [CRC:4]
-        # Min size = 1 + 2 + 0 + 4 = 7 bytes
-        if len(payload) < 7: return 
+        if len(payload) < 1: return 
         
         cmd_byte = payload[0]
-        if cmd_byte != 0x00: return # Only handle commands
+
+        # CMD 0x01: Log Message
+        if cmd_byte == 0x01:
+             text = payload[1:].decode('utf-8', errors='replace')
+             self.process_log_line(text)
+             return
+
+        # CMD 0x00: Image Data (Space Ready Format)
+        if cmd_byte != 0x00: return 
 
         # Payload (excl cmd) is: [ChunkID + Data + CRC]
         payload_no_cmd = payload[1:]

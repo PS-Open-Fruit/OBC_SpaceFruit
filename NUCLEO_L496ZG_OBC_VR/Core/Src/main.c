@@ -25,6 +25,7 @@
 #include "stdio.h"
 #include "usbd_cdc_if.h"
 #include <string.h>
+#include <stdarg.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -85,6 +86,7 @@ uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer);
 uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload);
 void OBC_Process_Loop(void);
 void OBC_On_Receive(uint8_t* Buf, uint32_t *Len);
+void OBC_Log(const char *fmt, ...);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -125,7 +127,7 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_CRC_Init();
   /* USER CODE BEGIN 2 */
-  printf("[OBC] System Booted. VCP Active.\r\n");
+  OBC_Log("[OBC] System Booted. VCP Active.");
   HAL_UART_Receive_IT(&hlpuart1, &uart_rx_char, 1);
   /* USER CODE END 2 */
 
@@ -338,11 +340,31 @@ PUTCHAR_PROTOTYPE
   return ch;
 }
 
+// --- OBC Logging (Framed) ---
+void OBC_Log(const char *fmt, ...) {
+    char buf[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    uint16_t msg_len = strlen(buf);
+    // Frame Format: [0x01] [ASCII Message]
+    uint8_t payload[300];
+    payload[0] = 0x01; // Log Command ID
+    if (msg_len > 250) msg_len = 250; 
+    memcpy(&payload[1], buf, msg_len);
+
+    uint8_t tx_frame[600];
+    uint16_t enc_len = SLIP_Encode(payload, msg_len + 1, tx_frame);
+    HAL_UART_Transmit(&hlpuart1, tx_frame, enc_len, 1000);
+}
+
 // --- SLIP Encoder ---
+// Does NOT insert Command Byte (e.g. 0x00). Can be used for any KISS Frame Type.
 uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer) {
     uint16_t idx = 0;
     out_buffer[idx++] = FEND;
-    out_buffer[idx++] = 0x00; // Header
     
     for (uint16_t i = 0; i < len; i++) {
         uint8_t c = payload[i];
@@ -395,10 +417,9 @@ void OBC_Process_Loop(void) {
         if (dec_len > 0) {
              uint8_t cmd_id = decoded[0];
              
-             // Check for PONG (0x10 is Ping, typically Payload replies with raw PONG string if configured that way, 
-             // but let's assume standard framing. The PONG string detection remains for legacy test)
-             if (dec_len == 4 && strncmp((char*)decoded, "PONG", 4) == 0) {
-                 printf("[OBC] >> PONG Received! Link Active.\r\n");
+             // Check for PONG (0x10) - Framed Response
+             if (cmd_id == 0x10) {
+                 OBC_Log("[OBC] >> PONG Received! Link Active.");
                  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
              }
              // Handle Image Capture Response (0x12)
@@ -406,16 +427,16 @@ void OBC_Process_Loop(void) {
                  // Format: [0x12] [ImgID:2] [Size:4]
                  uint32_t img_size;
                  memcpy(&img_size, &decoded[3], 4);
-                 printf("[OBC] Image Captured! Size: %lu bytes. Starting Download...\r\n", img_size);
+                 OBC_Log("[OBC] Image Captured! Size: %lu bytes. Starting Download...", img_size);
                  
                  // Start Downloading
                  download_active = 1;
                  next_chunk_to_req = 0;
 
                  // Kickstart download immediately
-                 uint8_t req[3] = {0x13, 0x00, 0x00};
+                 uint8_t req[4] = {0x00, 0x13, 0x00, 0x00}; // Prepend 0x00 for VR Data Frame
                  uint8_t tx_frame[16];
-                 uint16_t len = SLIP_Encode(req, 3, tx_frame);
+                 uint16_t len = SLIP_Encode(req, 4, tx_frame);
                  CDC_Transmit_FS(tx_frame, len);
              }
              // Handle Status Response (0x11)
@@ -437,7 +458,7 @@ void OBC_Process_Loop(void) {
                      if (t_dec < 0) t_dec = -t_dec; // Handle negative decimals
                      
                      // Print Formatted String (This goes to LPUART1 -> PC)
-                     printf("[OBC] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB | Disk: %lu MB\r\n", cpu, t_int, t_dec, ram, disk);
+                     OBC_Log("[OBC] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB | Disk: %lu MB", cpu, t_int, t_dec, ram, disk);
                  }
              }
              // Handle Image Chunk (0x13)
@@ -456,17 +477,19 @@ void OBC_Process_Loop(void) {
                      // Packet Format: [FEND] [0x00] [Escaped Payload] [FEND]
                      // Payload Format: [ChunkID:2] [Data:N] [CRC:2]
                      
-                     // 1. Construct Raw Payload (ChunkID + Data)
+                     // 1. Construct Raw Payload (CMD 0x00 + ChunkID + Data)
+                     // Since SLIP_Encode no longer adds header, we must add 0x00 explicitly.
                      uint8_t payload_buffer[600];
-                     payload_buffer[0] = chunk_id & 0xFF;
-                     payload_buffer[1] = (chunk_id >> 8) & 0xFF;
-                     memcpy(&payload_buffer[2], raw_data, data_len);
+                     payload_buffer[0] = 0x00; // KISS Data Command
+                     payload_buffer[1] = chunk_id & 0xFF;
+                     payload_buffer[2] = (chunk_id >> 8) & 0xFF;
+                     memcpy(&payload_buffer[3], raw_data, data_len);
                      
-                     uint16_t current_payload_len = 2 + data_len;
+                     uint16_t current_payload_len = 3 + data_len;
 
                      // 2. Append CRC-32 (Hardware - STM32L4)
-                     // ZLIB CRC32 Standard: XOR output with 0xFFFFFFFF
-                     uint32_t crc_hw = HAL_CRC_Calculate(&hcrc, (uint32_t*)payload_buffer, current_payload_len);
+                     // Checksum over ChunkID + Data (Excluding CMD 0x00)
+                     uint32_t crc_hw = HAL_CRC_Calculate(&hcrc, (uint32_t*)&payload_buffer[1], current_payload_len - 1);
                      crc_hw ^= 0xFFFFFFFF; 
 
                      payload_buffer[current_payload_len++] = crc_hw & 0xFF;
@@ -487,25 +510,24 @@ void OBC_Process_Loop(void) {
 
                      // Stop condition (Empty chunk or small chunk means EOF)
                      if (data_len < 200) { 
-                         printf("[OBC] Download Complete!\r\n");
+                         OBC_Log("[OBC] Download Complete!");
                          download_active = 0;
                      } else {
                          // REQ NEXT CHUNK
-                         uint8_t req[3];
-                         req[0] = 0x13;
-                         req[1] = next_chunk_to_req & 0xFF;
-                         req[2] = (next_chunk_to_req >> 8) & 0xFF;
+                         uint8_t req[4];
+                         req[0] = 0x00; // KISS Data
+                         req[1] = 0x13;
+                         req[2] = next_chunk_to_req & 0xFF;
+                         req[3] = (next_chunk_to_req >> 8) & 0xFF;
                          
                          uint8_t tx_frame[16];
-                         uint16_t len = SLIP_Encode(req, 3, tx_frame);
+                         uint16_t len = SLIP_Encode(req, 4, tx_frame);
                          CDC_Transmit_FS(tx_frame, len);
                      }
                  }
              }
              else {
-                 printf("[OBC] Rx Frame: %d bytes. Payload: ", dec_len);
-                 for(int k=0; k<dec_len; k++) printf("%02X ", decoded[k]);
-                 printf("\r\n");
+                 OBC_Log("[OBC] Rx Unknown Frame: %d bytes. Cmd: %02X", dec_len, cmd_id);
              }
         }
         // Mark Buffer B as empty, allowing ISR to fill it again
@@ -521,25 +543,25 @@ void OBC_Process_Loop(void) {
              uint8_t cmd_id = decoded_gs[0];
              
              if (cmd_id == 0x12) { // Capture
-                 uint8_t cmd[1] = {0x12};
+                 uint8_t cmd[2] = {0x00, 0x12}; // 0x00=KISS Data
                  uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 1, tx);
+                 uint16_t len = SLIP_Encode(cmd, 2, tx);
                  CDC_Transmit_FS(tx, len);
-                 printf("[OBC] GS CMD: Capture!\r\n");
+                 OBC_Log("[OBC] GS CMD: Capture!");
              }
              else if (cmd_id == 0x10) { // Ping
-                 uint8_t cmd[1] = {0x10};
+                 uint8_t cmd[2] = {0x00, 0x10};
                  uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 1, tx);
+                 uint16_t len = SLIP_Encode(cmd, 2, tx);
                  CDC_Transmit_FS(tx, len);
-                 printf("[OBC] GS CMD: Ping!\r\n");
+                 OBC_Log("[OBC] GS CMD: Ping!");
              }
              else if (cmd_id == 0x20) { // Status Request
-                 uint8_t cmd[1] = {0x11}; // Map to VR Status Cmd
+                 uint8_t cmd[2] = {0x00, 0x11}; // Map to VR Status Cmd
                  uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 1, tx);
+                 uint16_t len = SLIP_Encode(cmd, 2, tx);
                  CDC_Transmit_FS(tx, len);
-                 printf("[OBC] GS CMD: Status Req!\r\n");
+                 OBC_Log("[OBC] GS CMD: Status Req!");
              }
         }
         is_gs_frame_ready = 0;

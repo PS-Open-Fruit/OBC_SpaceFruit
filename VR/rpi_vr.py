@@ -167,7 +167,8 @@ class RPiVRSimulator:
 
         # --- PAYLOAD SIMULATION (Actual Pi Data) ---
         if cmd_id == 0x10: # Ping
-            resp = b'PONG'
+            # Response: [0x10] [0x01] (Framed Pong)
+            resp = bytearray([0x10, 0x01])
             
         elif cmd_id == 0x11: # Status
             cpu = int(get_cpu_load())
