@@ -66,6 +66,13 @@ uint16_t app_process_len = 0;
 
 // Flag: 1 = Buffer B has data pending, 0 = Buffer B is empty/processed
 volatile uint8_t is_frame_ready = 0;
+
+// --- Ground Station Buffers (LPUART1) ---
+uint8_t gs_isr_buffer[MAX_FRAME_SIZE];
+uint8_t gs_isr_idx = 0;
+uint8_t gs_app_buffer[MAX_FRAME_SIZE];
+uint16_t gs_app_len = 0;
+volatile uint8_t is_gs_frame_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -411,6 +418,25 @@ void OBC_Process_Loop(void) {
                  uint16_t len = SLIP_Encode(req, 3, tx_frame);
                  CDC_Transmit_FS(tx_frame, len);
              }
+             // Handle Status Response (0x11)
+             else if (cmd_id == 0x11) {
+                 // Payload: [0x11] [CPU:1] [Temp:4] [RAM:2]
+                 if (dec_len >= 8) {
+                     uint8_t cpu = decoded[1];
+                     float temp;
+                     uint16_t ram;
+                     memcpy(&temp, &decoded[2], 4);
+                     memcpy(&ram, &decoded[6], 2);
+                     
+                     // Manual Float-to-Int conversion to avoid %f linker issues
+                     int t_int = (int)temp;
+                     int t_dec = (int)((temp - t_int) * 10);
+                     if (t_dec < 0) t_dec = -t_dec; // Handle negative decimals
+                     
+                     // Print Formatted String (This goes to LPUART1 -> PC)
+                     printf("[OBC] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB\r\n", cpu, t_int, t_dec, ram);
+                 }
+             }
              // Handle Image Chunk (0x13)
              else if (cmd_id == 0x13) {
                  // Format: [0x13] [ChunkID:2] [Data...]
@@ -483,6 +509,39 @@ void OBC_Process_Loop(void) {
         is_frame_ready = 0; 
     }
 
+    // 1b. Process Ground Station Packets (LPUART1)
+    if (is_gs_frame_ready) {
+        uint8_t decoded_gs[512];
+        uint16_t dec_len = SLIP_Decode(gs_app_buffer, gs_app_len, decoded_gs);
+        
+        if (dec_len > 0) {
+             uint8_t cmd_id = decoded_gs[0];
+             
+             if (cmd_id == 0x12) { // Capture
+                 uint8_t cmd[1] = {0x12};
+                 uint8_t tx[32];
+                 uint16_t len = SLIP_Encode(cmd, 1, tx);
+                 CDC_Transmit_FS(tx, len);
+                 printf("[OBC] GS CMD: Capture!\r\n");
+             }
+             else if (cmd_id == 0x10) { // Ping
+                 uint8_t cmd[1] = {0x10};
+                 uint8_t tx[32];
+                 uint16_t len = SLIP_Encode(cmd, 1, tx);
+                 CDC_Transmit_FS(tx, len);
+                 printf("[OBC] GS CMD: Ping!\r\n");
+             }
+             else if (cmd_id == 0x20) { // Status Request
+                 uint8_t cmd[1] = {0x11}; // Map to VR Status Cmd
+                 uint8_t tx[32];
+                 uint16_t len = SLIP_Encode(cmd, 1, tx);
+                 CDC_Transmit_FS(tx, len);
+                 printf("[OBC] GS CMD: Status Req!\r\n");
+             }
+        }
+        is_gs_frame_ready = 0;
+    }
+
     // 2. Periodic Tasks
     if (HAL_GetTick() - last_tick > 1000) {
         last_tick = HAL_GetTick();
@@ -505,25 +564,26 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 // --- UART RX Callback (PC Commands) ---
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == LPUART1) {
-        // Echo for debug
-        // printf("[RX] %c\r\n", uart_rx_char);
-
-        if (uart_rx_char == 'c' || uart_rx_char == 'C') {
-             // Trigger Capture Command (0x12) to VR Subsystem
-             uint8_t cmd_capture[1] = {0x12};
-             uint8_t tx_frame[32];
-             uint16_t len = SLIP_Encode(cmd_capture, 1, tx_frame);
-             // Ensure this is properly implemented to send to VR USB port
-             CDC_Transmit_FS(tx_frame, len);
-             printf("[OBC] CMD: Capture Triggered!\r\n");
+        
+        // 1. Accumulate Byte
+        if (gs_isr_idx < MAX_FRAME_SIZE) {
+            gs_isr_buffer[gs_isr_idx++] = uart_rx_char;
         }
-        else if (uart_rx_char == 'p' || uart_rx_char == 'P') {
-             // Trigger Ping (0x10)
-             uint8_t cmd_ping[1] = {0x10};
-             uint8_t tx_frame[32];
-             uint16_t len = SLIP_Encode(cmd_ping, 1, tx_frame);
-             CDC_Transmit_FS(tx_frame, len);
-             printf("[OBC] CMD: Ping Sent!\r\n");
+        
+        // 2. Sync Check: Reset if first byte isn't FEND
+        if (gs_isr_idx == 1 && uart_rx_char != FEND) {
+            gs_isr_idx = 0; 
+        }
+        
+        // 3. End of Frame Check
+        if (gs_isr_idx > 1 && uart_rx_char == FEND) {
+            if (is_gs_frame_ready == 0) {
+                 // Move to App Buffer
+                 memcpy(gs_app_buffer, gs_isr_buffer, gs_isr_idx);
+                 gs_app_len = gs_isr_idx;
+                 is_gs_frame_ready = 1;
+            }
+            gs_isr_idx = 0;
         }
 
         // Re-arm interrupt

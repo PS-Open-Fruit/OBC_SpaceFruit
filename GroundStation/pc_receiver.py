@@ -65,15 +65,17 @@ class GroundStation:
         # Start main CLI loop
         self.cli_loop()
 
-    def send_telecommand(self, cmd_str):
-        """Sends a command string/char to the OBC."""
+    def send_kiss_command(self, cmd_id):
+        """Sends a KISS-framed command to the OBC."""
         if not self.ser or not self.ser.is_open: 
             print("❌ Serial Closed")
             return
         
-        # Send as bytes (UTF-8)
-        self.ser.write(cmd_str.encode('utf-8'))
-        print(f"   [TX] Sent: '{cmd_str}'")
+        # Wrap in KISS Frame
+        # Payload is just the Command ID (1 byte)
+        frame = KISSProtocol.wrap_frame(bytes([cmd_id]))
+        self.ser.write(frame)
+        print(f"   [TX] Sent CMD: 0x{cmd_id:02X}")
 
     def cli_loop(self):
         """Interactive Command Line Interface."""
@@ -91,13 +93,13 @@ class GroundStation:
                     break
                 
                 elif cmd in ['p', 'ping']:
-                    self.send_telecommand('p')
+                    self.send_kiss_command(0x10) # 0x10 = Ping
                     
                 elif cmd in ['s', 'status']:
-                    self.send_telecommand('s')
+                    self.send_kiss_command(0x20) # 0x20 = Status Request
                     
                 elif cmd in ['c', 'capture']:
-                    self.send_telecommand('c')
+                    self.send_kiss_command(0x12) # 0x12 = Capture
                     print("REQUESTED CAPTURE...")
 
             except KeyboardInterrupt:
@@ -226,11 +228,28 @@ class GroundStation:
                 if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
             
             self.downloading = False
+            sys.stdout.write("GS> ")
+            sys.stdout.flush()
 
         # 3. Standard Logs
         else:
             if not self.downloading:
-                print(f"   [OBC] {text}")
+                # Move to start of line to overwrite 'GS> ' if it's there
+                sys.stdout.write("\r") 
+                
+                prefix = "   " 
+                
+                # Avoid double prefix if OBC already sent it
+                if text.startswith("[OBC]"):
+                    print(f"{prefix}{text}")
+                else:
+                    print(f"{prefix}[OBC] {text}")
+                
+                # Restore Prompt visually so user knows they can type
+                # Heuristic: Only show prompt if we are likely done with the sequence
+                if "GS CMD:" not in text:
+                    sys.stdout.write("GS> ")
+                    sys.stdout.flush()
 
     def print_progress(self):
         """Prints a simple progress bar."""

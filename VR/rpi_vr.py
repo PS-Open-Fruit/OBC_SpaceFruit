@@ -165,7 +165,9 @@ class RPiVRSimulator:
             cpu = int(get_cpu_load())
             temp = get_rpi_temp()
             ram = get_free_ram()
-            resp = struct.pack("<BfH", cpu, temp, ram)
+            # Prepend 0x11 Command ID so OBC can identify it
+            resp = bytearray([0x11])
+            resp.extend(struct.pack("<BfH", cpu, temp, ram))
             
         elif cmd_id == 0x12: # Capture
             self.img_counter += 1
