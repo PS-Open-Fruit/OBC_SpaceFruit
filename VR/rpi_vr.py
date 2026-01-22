@@ -217,12 +217,18 @@ class RPiVRSimulator:
                 # Show progress
                 if self.last_file_size > 0:
                     total_chunks = (self.last_file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
-                    percent = (chunk_id / total_chunks) * 100
-                    # Print progress bar every 5 chunks to reduce I/O or if it's the last one
-                    if chunk_id % 5 == 0 or chunk_id >= total_chunks - 1:
-                        print(f"   📡 Transferring: {percent:.1f}% (Chunk {chunk_id}/{total_chunks})", end='\r')
-                        if chunk_id >= total_chunks - 1:
-                            print() # Newline at end
+                    
+                    # Calculate percentage based on (chunk_id + 1) since chunk_id is 0-indexed
+                    percent = ((chunk_id + 1) / total_chunks) * 100
+                    
+                    # Print progress bar every 5 chunks or if it's the last one
+                    is_last_chunk = (chunk_id >= total_chunks - 1)
+                    if chunk_id % 5 == 0 or is_last_chunk:
+                        print(f"   📡 Transferring: {percent:.1f}% (Chunk {chunk_id + 1}/{total_chunks})", end='\r')
+                        
+                        if is_last_chunk:
+                            print() # Clear line/New line
+                            print("   ✅ Transfer Complete!")
 
                 offset = chunk_id * CHUNK_SIZE
                 
