@@ -55,6 +55,7 @@ UART_HandleTypeDef hlpuart1;
 // Used exclusively by OBC_On_Receive() to build up incoming frames byte-by-byte.
 uint8_t isr_rx_buffer[MAX_FRAME_SIZE];
 uint8_t isr_rx_idx = 0;
+uint8_t uart_rx_char; // for single-byte UART interrupt
 
 // --- Buffer B: Application Processor (Low Priority) ---
 // Safe copy of the frame for the main loop to process without blocking interrupts.
@@ -114,6 +115,7 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   printf("[OBC] System Booted. VCP Active.\r\n");
+  HAL_UART_Receive_IT(&hlpuart1, &uart_rx_char, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -204,7 +206,7 @@ static void MX_LPUART1_UART_Init(void)
 
   /* USER CODE END LPUART1_Init 1 */
   hlpuart1.Instance = LPUART1;
-  hlpuart1.Init.BaudRate = 115200;
+  hlpuart1.Init.BaudRate = 9600;
   hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
   hlpuart1.Init.StopBits = UART_STOPBITS_1;
   hlpuart1.Init.Parity = UART_PARITY_NONE;
@@ -217,7 +219,12 @@ static void MX_LPUART1_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN LPUART1_Init 2 */
-
+  // Manually disable FIFO and set baudrate again to be sure (since regeneration might have messed flags)
+  hlpuart1.Init.BaudRate = 9600;
+  if (HAL_UART_Init(&hlpuart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE END LPUART1_Init 2 */
 
 }
@@ -381,11 +388,12 @@ void OBC_Process_Loop(void) {
                      // Toggle LED for Visual Feedback
                      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
-                     // PRINT HEX DATA FOR PC SCRIPT
-                     // Format: "[DATA] A1 B2 C3 ..."
-                     printf("[DATA] ");
-                     for(int k=0; k<data_len; k++) printf("%02X ", raw_data[k]);
-                     printf("\r\n");
+                     // SEND COMPLIANT KISS PROTOCOL FRAME (OBC -> GS)
+                    // Packet: [FEND] [0x00] [Escaped Data] [FEND]
+                    // Buffer size: Max chunk ~512 needs ~1024 for worst-case escaping
+                    uint8_t kiss_tx_buffer[1024];
+                    uint16_t kiss_len = SLIP_Encode(raw_data, data_len, kiss_tx_buffer);
+                    HAL_UART_Transmit(&hlpuart1, kiss_tx_buffer, kiss_len, 2000);
                      
                      // Advance
                      next_chunk_to_req++;
@@ -418,21 +426,50 @@ void OBC_Process_Loop(void) {
     }
 
     // 2. Periodic Tasks
-    // Every 5 seconds, Trigger Image Capture (Demo)
-    if (HAL_GetTick() - last_tick > 5000) {
+    if (HAL_GetTick() - last_tick > 1000) {
         last_tick = HAL_GetTick();
         
         // Heartbeat LED (Red)
         HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+    }
+}
 
-        // Only trigger new capture if not currently downloading
-        if (!download_active) {
+// --- UART Error Callback ---
+// Restart reception if an error (Overrun, Noise, Framing) occurs
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == LPUART1) {
+        // Clear Error Flags (handled by HAL, but good to be explicit about intent)
+        // Restart Reception
+        HAL_UART_Receive_IT(&hlpuart1, &uart_rx_char, 1);
+    }
+}
+
+// --- UART RX Callback (PC Commands) ---
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == LPUART1) {
+        // Echo for debug
+        // printf("[RX] %c\r\n", uart_rx_char);
+
+        if (uart_rx_char == 'c' || uart_rx_char == 'C') {
+             // Trigger Capture Command (0x12) to VR Subsystem
              uint8_t cmd_capture[1] = {0x12};
              uint8_t tx_frame[32];
              uint16_t len = SLIP_Encode(cmd_capture, 1, tx_frame);
+             // Ensure this is properly implemented to send to VR USB port
              CDC_Transmit_FS(tx_frame, len);
-             printf("[OBC] Triggering Capture...\r\n");
+             printf("[OBC] CMD: Capture Triggered!\r\n");
         }
+        else if (uart_rx_char == 'p' || uart_rx_char == 'P') {
+             // Trigger Ping (0x10)
+             uint8_t cmd_ping[1] = {0x10};
+             uint8_t tx_frame[32];
+             uint16_t len = SLIP_Encode(cmd_ping, 1, tx_frame);
+             CDC_Transmit_FS(tx_frame, len);
+             printf("[OBC] CMD: Ping Sent!\r\n");
+        }
+
+        // Re-arm interrupt
+        HAL_UART_Receive_IT(&hlpuart1, &uart_rx_char, 1);
     }
 }
 
