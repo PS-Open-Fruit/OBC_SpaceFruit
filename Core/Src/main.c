@@ -28,6 +28,7 @@
 #include "rv3028c7.h"
 #include "tmp1075.h"
 #include "littlefs_port.h"
+#include "kiss_utils.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,7 +44,8 @@ usb_data_t usb_buff = {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#define EPS_RECV_LEN 128 // Increased size for safety
+  #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -75,45 +77,47 @@ DMA_HandleTypeDef hdma_usart2_tx;
 /* Definitions for MainTask */
 osThreadId_t MainTaskHandle;
 const osThreadAttr_t MainTask_attributes = {
-    .name = "MainTask",
-    .stack_size = 1024 * 4,
-    .priority = (osPriority_t)osPriorityNormal,
+  .name = "MainTask",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for USBTask */
 osThreadId_t USBTaskHandle;
 const osThreadAttr_t USBTask_attributes = {
-    .name = "USBTask",
-    .stack_size = 1024 * 4,
-    .priority = (osPriority_t)osPriorityNormal,
+  .name = "USBTask",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for wdtFeed */
 osThreadId_t wdtFeedHandle;
 const osThreadAttr_t wdtFeed_attributes = {
-    .name = "wdtFeed",
-    .stack_size = 128 * 4,
-    .priority = (osPriority_t)osPriorityLow,
+  .name = "wdtFeed",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for sensorQuery */
 osThreadId_t sensorQueryHandle;
 const osThreadAttr_t sensorQuery_attributes = {
-    .name = "sensorQuery",
-    .stack_size = 128 * 4,
-    .priority = (osPriority_t)osPriorityNormal,
+  .name = "sensorQuery",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
-uint8_t cdcDataQueueBuffer[128 * sizeof(usb_data_t)];
+uint8_t cdcDataQueueBuffer[ 128 * sizeof( usb_data_t ) ];
 osStaticMessageQDef_t cdcDataQueueControlBlock;
 const osMessageQueueAttr_t cdcDataQueue_attributes = {
-    .name = "cdcDataQueue",
-    .cb_mem = &cdcDataQueueControlBlock,
-    .cb_size = sizeof(cdcDataQueueControlBlock),
-    .mq_mem = &cdcDataQueueBuffer,
-    .mq_size = sizeof(cdcDataQueueBuffer)};
+  .name = "cdcDataQueue",
+  .cb_mem = &cdcDataQueueControlBlock,
+  .cb_size = sizeof(cdcDataQueueControlBlock),
+  .mq_mem = &cdcDataQueueBuffer,
+  .mq_size = sizeof(cdcDataQueueBuffer)
+};
 /* Definitions for epsUartQueue */
 osMessageQueueId_t epsUartQueueHandle;
 const osMessageQueueAttr_t epsUartQueue_attributes = {
-    .name = "epsUartQueue"};
+  .name = "epsUartQueue"
+};
 /* USER CODE BEGIN PV */
 
 #define COM_UART huart4
@@ -152,9 +156,9 @@ void sensorQueryTask(void *argument);
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
 
@@ -217,10 +221,10 @@ int main(void)
 
   /* Create the queue(s) */
   /* creation of cdcDataQueue */
-  cdcDataQueueHandle = osMessageQueueNew(128, sizeof(usb_data_t), &cdcDataQueue_attributes);
+  cdcDataQueueHandle = osMessageQueueNew (128, sizeof(usb_data_t), &cdcDataQueue_attributes);
 
   /* creation of epsUartQueue */
-  epsUartQueueHandle = osMessageQueueNew(16, sizeof(uint16_t), &epsUartQueue_attributes);
+  epsUartQueueHandle = osMessageQueueNew (16, sizeof(uint8_t), &epsUartQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -264,25 +268,25 @@ int main(void)
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-   */
+  */
   if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Initializes the RCC Oscillators according to the specified parameters
-   * in the RCC_OscInitTypeDef structure.
-   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_HSE;
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -298,8 +302,9 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-   */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
@@ -312,10 +317,10 @@ void SystemClock_Config(void)
 }
 
 /**
- * @brief CAN2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief CAN2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_CAN2_Init(void)
 {
 
@@ -345,13 +350,14 @@ static void MX_CAN2_Init(void)
   /* USER CODE BEGIN CAN2_Init 2 */
 
   /* USER CODE END CAN2_Init 2 */
+
 }
 
 /**
- * @brief CRC Initialization Function
- * @param None
- * @retval None
- */
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_CRC_Init(void)
 {
 
@@ -375,13 +381,14 @@ static void MX_CRC_Init(void)
   /* USER CODE BEGIN CRC_Init 2 */
 
   /* USER CODE END CRC_Init 2 */
+
 }
 
 /**
- * @brief I2C4 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief I2C4 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_I2C4_Init(void)
 {
 
@@ -407,14 +414,14 @@ static void MX_I2C4_Init(void)
   }
 
   /** Configure Analogue filter
-   */
+  */
   if (HAL_I2CEx_ConfigAnalogFilter(&hi2c4, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Configure Digital filter
-   */
+  */
   if (HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0) != HAL_OK)
   {
     Error_Handler();
@@ -422,13 +429,14 @@ static void MX_I2C4_Init(void)
   /* USER CODE BEGIN I2C4_Init 2 */
 
   /* USER CODE END I2C4_Init 2 */
+
 }
 
 /**
- * @brief IWDG Initialization Function
- * @param None
- * @retval None
- */
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_IWDG_Init(void)
 {
 
@@ -450,13 +458,14 @@ static void MX_IWDG_Init(void)
   /* USER CODE BEGIN IWDG_Init 2 */
 
   /* USER CODE END IWDG_Init 2 */
+
 }
 
 /**
- * @brief SPI1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_SPI1_Init(void)
 {
 
@@ -489,13 +498,14 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
 }
 
 /**
- * @brief SPI2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_SPI2_Init(void)
 {
 
@@ -528,13 +538,14 @@ static void MX_SPI2_Init(void)
   /* USER CODE BEGIN SPI2_Init 2 */
 
   /* USER CODE END SPI2_Init 2 */
+
 }
 
 /**
- * @brief UART4 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief UART4 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_UART4_Init(void)
 {
 
@@ -562,13 +573,14 @@ static void MX_UART4_Init(void)
   /* USER CODE BEGIN UART4_Init 2 */
 
   /* USER CODE END UART4_Init 2 */
+
 }
 
 /**
- * @brief UART5 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief UART5 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_UART5_Init(void)
 {
 
@@ -596,13 +608,14 @@ static void MX_UART5_Init(void)
   /* USER CODE BEGIN UART5_Init 2 */
 
   /* USER CODE END UART5_Init 2 */
+
 }
 
 /**
- * @brief USART1 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART1_UART_Init(void)
 {
 
@@ -630,13 +643,14 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* USER CODE END USART1_Init 2 */
+
 }
 
 /**
- * @brief USART2 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART2_UART_Init(void)
 {
 
@@ -664,13 +678,14 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
 }
 
 /**
- * @brief USART3 Initialization Function
- * @param None
- * @retval None
- */
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_USART3_UART_Init(void)
 {
 
@@ -698,11 +713,12 @@ static void MX_USART3_UART_Init(void)
   /* USER CODE BEGIN USART3_Init 2 */
 
   /* USER CODE END USART3_Init 2 */
+
 }
 
 /**
- * Enable DMA controller clock
- */
+  * Enable DMA controller clock
+  */
 static void MX_DMA_Init(void)
 {
 
@@ -720,13 +736,14 @@ static void MX_DMA_Init(void)
   /* DMA2_Channel5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel5_IRQn);
+
 }
 
 /**
- * @brief GPIO Initialization Function
- * @param None
- * @retval None
- */
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -751,7 +768,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, NOR_RST_Pin | NOR_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOD, NOR_RST_Pin|NOR_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : TEMP_ALERT_Pin */
   GPIO_InitStruct.Pin = TEMP_ALERT_Pin;
@@ -780,7 +797,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : NOR_RST_Pin NOR_CS_Pin */
-  GPIO_InitStruct.Pin = NOR_RST_Pin | NOR_CS_Pin;
+  GPIO_InitStruct.Pin = NOR_RST_Pin|NOR_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -816,6 +833,10 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     osMessageQueuePut(epsUartQueueHandle, (void *)&Size, 0, 0);
     // osSemaphoreRelease(epsDataSemHandle);
   }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+
 }
 
 /* USER CODE END 4 */
@@ -1000,29 +1021,15 @@ void sensorQueryTask(void *argument)
   /* Infinite loop */
 
   /* Defines */
-#define EPS_RECV_LEN 128 // Increased size for safety
-#define FEND 0xC0
-#define FESC 0xDB
-#define TFEND 0xDC
-#define TFESC 0xDD
 
   // --- RE-ASSEMBLY BUFFER (The "State Machine") ---
   static uint8_t frame_buf[EPS_RECV_LEN];
-  static uint16_t frame_idx = 0;
-  static uint8_t escape_mode = 0; // 1 if we just saw 0xDB
-
-  // Temp buffer for linearizing circular DMA data
-  uint8_t raw_chunk[EPS_RECV_LEN];
-
-  /* Static allocation to keep it off the stack if it's large */
   static uint8_t eps_recv_buf[EPS_RECV_LEN];
+  uint8_t eps_recv_queue = 0;
+  static uint16_t frame_idx = 0;
 
   /* Start DMA in Circular Mode ONCE */
-  HAL_UARTEx_ReceiveToIdle_DMA(&EPS_UART, eps_recv_buf, EPS_RECV_LEN);
-
-  // Queue tracking
-  uint16_t current_index = 0;
-  uint16_t last_index = 0;
+  HAL_UART_Receive_DMA(&EPS_UART, eps_recv_buf, 1);
 
   /* Variables for processing */
   uint8_t process_buf[EPS_RECV_LEN]; // Temp buffer to assemble linear frame
@@ -1034,7 +1041,7 @@ void sensorQueryTask(void *argument)
     HAL_UART_Transmit_DMA(&EPS_UART, queryData, 4);
 
     // 2. Wait for response (Wait 500ms max, or however long your device takes to reply)
-    osStatus_t os_ret = osMessageQueueGet(epsUartQueueHandle, &current_index, NULL, 500);
+    osStatus_t os_ret = osMessageQueueGet(epsUartQueueHandle, &eps_recv_queue, NULL, 500);
 
     // Optional: Delay before next query
     osDelay(500);
@@ -1043,13 +1050,13 @@ void sensorQueryTask(void *argument)
 }
 
 /**
- * @brief  Period elapsed callback in non blocking mode
- * @note   This function is called  when TIM1 interrupt took place, inside
- * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
- * a global variable "uwTick" used as application time base.
- * @param  htim : TIM handle
- * @retval None
- */
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM1 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
@@ -1065,9 +1072,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 }
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -1080,12 +1087,12 @@ void Error_Handler(void)
 }
 #ifdef USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
