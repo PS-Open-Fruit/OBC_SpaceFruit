@@ -183,9 +183,10 @@ int main(void)
     }
 
     //Copy in a string
-    snprintf((char*)workBuffer, 512, "a new file is made!");
+    char text[] = "this is test for STM32L496ZG use FatFs library with SPI SD Card reader to save the text.";
+    snprintf((char*)workBuffer, 512, text);
     UINT bytesWrote;
-    fres = f_write(&fil, workBuffer, 19, &bytesWrote);
+    fres = f_write(&fil, workBuffer, strlen(text), &bytesWrote);
     if(fres == FR_OK) {
   	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
     } else {
@@ -212,6 +213,104 @@ int main(void)
         printf("Failed to open 'write.txt' for verification (Error %i)\r\n", fres);
     }
     // --------------------
+
+    // --- 3MB Experiment ---
+    printf("Starting 3MB Data Experiment (Writing 3MB to SD)...\r\n");
+    
+    // Use a larger buffer for performance (e.g. 4KB)
+    // We allocate it static to avoid stack overflow, or strictly inside a function if stack allows.
+    // L496ZG has plenty of RAM/Stack usually, but static is safer.
+    static uint8_t bigBuffer[4096]; 
+    const uint32_t TARGET_SIZE = 3 * 1024 * 1024; // 3 MB
+    uint32_t totalWritten = 0;
+    uint32_t startTime, endTime;
+    
+    // Fill buffer with dummy data pattern
+    for(int i=0; i<4096; i++) bigBuffer[i] = (uint8_t)(i % 256);
+    
+    fres = f_open(&fil, "data_3mb.bin", FA_WRITE | FA_CREATE_ALWAYS);
+    if(fres == FR_OK) {
+        printf("File 'data_3mb.bin' opened. Writing...\r\n");
+        startTime = HAL_GetTick();
+        
+        while(totalWritten < TARGET_SIZE) {
+            UINT bw;
+            fres = f_write(&fil, bigBuffer, sizeof(bigBuffer), &bw);
+            if(fres != FR_OK || bw == 0) {
+                printf("Write error at %lu bytes. Error: %d\r\n", totalWritten, fres);
+                break;
+            }
+            totalWritten += bw;
+            
+            // Toggle LED every ~1MB to show activity (optional)
+            if((totalWritten % (1024*1024)) < sizeof(bigBuffer)) {
+                 HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+            }
+        }
+        
+        endTime = HAL_GetTick();
+        f_close(&fil);
+        
+        // Calculate duration in milliseconds
+        uint32_t duration_ms = endTime - startTime;
+        if (duration_ms == 0) duration_ms = 1; // Prevent division by zero
+
+        // Calculate Time (Seconds.Centiseconds)
+        uint32_t time_sec = duration_ms / 1000;
+        uint32_t time_centisec = (duration_ms % 1000) / 10; 
+
+        // Calculate Speed (KB/s) using integer arithmetic
+        // Speed = (Bytes / 1024) / (ms / 1000) = (Bytes * 1000) / (1024 * ms)
+        // Multiply by 100 first to keep 2 decimal places of precision for printing
+        // Use uint64_t to prevent overflow during multiplication: 3MB * 100000 approx 3*10^11 fits in uint64
+        uint64_t speed_calc = ((uint64_t)totalWritten * 1000 * 100) / ((uint64_t)1024 * duration_ms);
+        uint32_t speed_int = (uint32_t)(speed_calc / 100);
+        uint32_t speed_frac = (uint32_t)(speed_calc % 100);
+
+        printf("3MB Experiment Complete.\r\n");
+        printf("Wrote: %lu bytes\r\n", totalWritten);
+        printf("Time: %lu.%02lu s\r\n", time_sec, time_centisec);
+        printf("Speed: %lu.%02lu KB/s\r\n", speed_int, speed_frac);
+        
+    } else {
+        printf("Failed to open 'data_3mb.bin' (Error %d)\r\n", fres);
+    }
+
+    // --- Verify 3MB ---
+    printf("Verifying 3MB data...\r\n");
+    fres = f_open(&fil, "data_3mb.bin", FA_READ);
+    if(fres == FR_OK) {
+        uint32_t totalRead = 0;
+        uint32_t errors = 0;
+        while(totalRead < TARGET_SIZE) {
+            UINT br;
+            // Clear buffer before read to ensure we are reading new data? 
+            // Actually we want to compare. We can read into a temp verify buffer?
+            // Or overwrite bigBuffer and check? 
+            // If we overwrite bigBuffer, we lose the reference pattern.
+            // But the reference pattern is simple (i % 256).
+            // So we can regenerate it on the fly or just check it.
+            
+            fres = f_read(&fil, bigBuffer, sizeof(bigBuffer), &br);
+            if(fres != FR_OK || br == 0) break;
+            
+            for(unsigned int i=0; i<br; i++) {
+                if(bigBuffer[i] != (uint8_t)(i % 256)) {
+                    // Logic error: buffer index vs absolute index pattern?
+                    // No, I filled buffer with (i % 256). So every chunk is identical.
+                    // So checking against (i % 256) is correct.
+                    errors++;
+                }
+            }
+            totalRead += br;
+        }
+        f_close(&fil);
+        if(errors == 0) printf("Verification Successful! 3MB match.\r\n");
+        else printf("Verification Failed! %lu errors found.\r\n", errors);
+    } else {
+        printf("Failed to open 'data_3mb.bin' for verify.\r\n");
+    }
+    // ------------------
 
     //We're done, so de-mount the drive
     HAL_Delay(100);
