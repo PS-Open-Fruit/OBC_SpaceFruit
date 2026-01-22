@@ -224,8 +224,7 @@ int main(void)
     // --------------------
 
     // --- USB CDC Image Receive Experiment ---
-    printf("Starting Image Rx Experiment (USB CDC)...\r\n");
-    printf("Waiting for data via USB CDC (COMx)...\r\n");
+    printf("Starting Image Rx (Protocol: START:<filename> -> Data)...\r\n");
     
     // Externs from usbd_cdc_if.c
     extern uint8_t UserRxBufferFS_A[];
@@ -235,6 +234,7 @@ int main(void)
     extern volatile uint32_t Buffer_A_Length;
     extern volatile uint32_t Buffer_B_Length;
     extern void CDC_Buffer_Processed(uint8_t buffer_id);
+    extern uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len); // Extern Transmit
 
     // Reset Globals
     totalBytesReceived = 0;
@@ -244,99 +244,123 @@ int main(void)
     // Ensure flags are clear
     Buffer_A_Ready = 0;
     Buffer_B_Ready = 0;
+
+    // State Machine
+    // 0: Waiting for Start Command
+    // 1: Receiving Data
+    uint8_t receiveState = 0; 
+    char currentFilename[64] = {0};
+    uint32_t startTime = 0;
     
-    fres = f_open(&fil, "image.png", FA_WRITE | FA_CREATE_ALWAYS);
-    if(fres != FR_OK) {
-         printf("Failed to create 'image.png' (Error %d)\r\n", fres);
-    } else {
-         // Wait for first byte up to 30 seconds
-         printf("Waiting for data stream...\r\n");
-         while(totalBytesReceived == 0) {
-              // Check if any buffer became ready to detect start
-              if(Buffer_A_Ready || Buffer_B_Ready) {
-                  break;
-              }
-             
-              if((HAL_GetTick() - lastByteTime) > 30000) {
-                 printf("Timeout waiting for start. (Received 0 bytes)\r\n");
-                 break;
-              }
-              // Heartbeat on LD3 (Red)
-              if((HAL_GetTick() - lastHeartbeat) > 500) {
-                  HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
-                  lastHeartbeat = HAL_GetTick();
-              }
+    printf("Waiting for command...\r\n");
+
+    while(1) {
+         // --- Heartbeat (Red LED) ---
+         if((HAL_GetTick() - lastHeartbeat) > 500) {
+             HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+             lastHeartbeat = HAL_GetTick();
          }
-         
-         if(Buffer_A_Ready || Buffer_B_Ready) {
-             printf("Data detected! Receiving...\r\n");
-             uint32_t startTime = HAL_GetTick();
-             lastByteTime = HAL_GetTick();
-             // Ensure Red LED is OFF during transfer
-             HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-             
-             while(1) {
-                 uint8_t activity = 0;
-                 
-                 // Check if A is ready
-                 if(Buffer_A_Ready) {
-                     UINT bw;
-                     fres = f_write(&fil, UserRxBufferFS_A, Buffer_A_Length, &bw);
-                     if(fres != FR_OK) printf("Write A Error: %d\r\n", fres);
-                     
-                     totalBytesReceived += Buffer_A_Length;
-                     lastByteTime = HAL_GetTick();
-                     
-                     // Toggle LED2 (Blue) for activity
-                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-                     
-                     // Signal that buffer is processed
-                     CDC_Buffer_Processed(0); 
-                     activity = 1;
-                 }
-                 
-                 // Check if B is ready
-                 if(Buffer_B_Ready) {
-                     UINT bw;
-                     fres = f_write(&fil, UserRxBufferFS_B, Buffer_B_Length, &bw);
-                     if(fres != FR_OK) printf("Write B Error: %d\r\n", fres);
-                     
-                     totalBytesReceived += Buffer_B_Length;
-                     lastByteTime = HAL_GetTick();
-                     
-                     // Toggle LED2 (Blue) for activity
-                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-                     
-                     // Signal that buffer is processed
-                     CDC_Buffer_Processed(1);
-                     activity = 1;
-                 }
-                 
-                 // Timeout / Idle Detection (2 seconds)
-                 if (!activity && (HAL_GetTick() - lastByteTime) > 2000) {
-                     printf("\r\nEnd of transmission detected (Timeout 2s).\r\n");
-                     break;
-                 }
-             }
-             
-             uint32_t endTime = HAL_GetTick();
+
+         // check exit condition (Timeout while receiving)
+         if (receiveState == 1 && (HAL_GetTick() - lastByteTime) > 3000) {
+             printf("\r\nEnd of transmission (Timeout). Closing file.\r\n");
              f_close(&fil);
              
+             // Calc Speed
+             uint32_t endTime = HAL_GetTick();
              uint32_t duration_ms = endTime - startTime;
              if (duration_ms == 0) duration_ms = 1;
-             
              uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
-             uint32_t speed_int = (uint32_t)(speed_calc / 100);
-             uint32_t speed_frac = (uint32_t)(speed_calc % 100);
+             printf("Received: %lu bytes\r\n", totalBytesReceived);
+             printf("Speed: %lu.%02lu KB/s\r\n", (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
              
-             printf("Received & Saved: %lu bytes\r\n", totalBytesReceived);
-             printf("Time: %lu ms\r\n", duration_ms);
-             printf("Speed: %lu.%02lu KB/s\r\n", speed_int, speed_frac);
+             break; // Exit Experiment Loop
+         }
+         
+         // Process Buffer A
+         if(Buffer_A_Ready) {
+             lastByteTime = HAL_GetTick();
+             HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Blue LED Activity
+
+             if (receiveState == 0) {
+                 // Check for START: command
+                 if (strncmp((char*)UserRxBufferFS_A, "START:", 6) == 0 && Buffer_A_Length > 6) {
+                     memset(currentFilename, 0, sizeof(currentFilename));
+                     uint32_t nameLen = Buffer_A_Length - 6;
+                     if(nameLen > 63) nameLen = 63;
+                     memcpy(currentFilename, UserRxBufferFS_A + 6, nameLen);
+                     
+                     // Sanitize filename (remove non-printable)
+                     for(int i=0; i<nameLen; i++) {
+                         if(currentFilename[i] < 32 || currentFilename[i] > 126) currentFilename[i] = 0;
+                     }
+
+                     printf("CMD Received. File: %s\r\n", currentFilename);
+                     fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
+                     if(fres == FR_OK) {
+                         receiveState = 1;
+                         startTime = HAL_GetTick();
+                         totalBytesReceived = 0;
+                         CDC_Transmit_FS((uint8_t*)"OK", 2); // Send ACK
+                         printf("File Open. Sending ACK. Receiving...\r\n");
+                     } else {
+                         printf("Create File Failed: %d\r\n", fres);
+                         CDC_Transmit_FS((uint8_t*)"ERR", 3);
+                     }
+                 } else {
+                     printf("Ignored Invalid Start Packet (Len: %lu)\r\n", Buffer_A_Length);
+                 }
+             } 
+             else if (receiveState == 1) {
+                 // Write Data
+                 UINT bw;
+                 fres = f_write(&fil, UserRxBufferFS_A, Buffer_A_Length, &bw);
+                 if(fres != FR_OK) printf("Write Error: %d\r\n", fres);
+                 totalBytesReceived += Buffer_A_Length;
+             }
              
-         } else {
-             f_close(&fil);
-             // f_unlink("image.png"); // KEEP FILE FOR DEBUG
-             printf("Closed empty 'image.png' due to timeout.\r\n");
+             CDC_Buffer_Processed(0); // Release A
+         }
+
+         // Process Buffer B
+         if(Buffer_B_Ready) {
+             lastByteTime = HAL_GetTick();
+             HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); 
+
+             if (receiveState == 0) {
+                 // Usually commands come in A if single packet, but handle B just in case
+                  if (strncmp((char*)UserRxBufferFS_B, "START:", 6) == 0 && Buffer_B_Length > 6) {
+                     memset(currentFilename, 0, sizeof(currentFilename));
+                     uint32_t nameLen = Buffer_B_Length - 6;
+                     if(nameLen > 63) nameLen = 63;
+                     memcpy(currentFilename, UserRxBufferFS_B + 6, nameLen);
+                     
+                     for(int i=0; i<nameLen; i++) {
+                         if(currentFilename[i] < 32 || currentFilename[i] > 126) currentFilename[i] = 0;
+                     }
+
+                     printf("CMD Received (B). File: %s\r\n", currentFilename);
+                     fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
+                     if(fres == FR_OK) {
+                         receiveState = 1;
+                         startTime = HAL_GetTick();
+                         totalBytesReceived = 0;
+                         CDC_Transmit_FS((uint8_t*)"OK", 2);
+                         printf("File Open. Sending ACK. Receiving...\r\n");
+                     } else {
+                         printf("Create File Failed: %d\r\n", fres);
+                         CDC_Transmit_FS((uint8_t*)"ERR", 3);
+                     }
+                 }
+             } 
+             else if (receiveState == 1) {
+                 UINT bw;
+                 fres = f_write(&fil, UserRxBufferFS_B, Buffer_B_Length, &bw);
+                 if(fres != FR_OK) printf("Write Error: %d\r\n", fres);
+                 totalBytesReceived += Buffer_B_Length;
+             }
+             
+             CDC_Buffer_Processed(1); // Release B
          }
     }
     // ----------------------
@@ -477,7 +501,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;

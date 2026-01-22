@@ -3,13 +3,14 @@ import serial.tools.list_ports
 import time
 import os
 import sys
+from datetime import datetime
 
 # Configuration
 # For USB CDC, Baudrate is ignored by the device, but needed for pyserial to open the port.
 BAUDRATE = 115200 
 TIMEOUT = 2
 CHUNK_SIZE = 4096 # Send in 4KB chunks
-TARGET_FILE = 'Screenshot 2025-12-03 135930.png'
+TARGET_FILE = 'Panorama_of_3mb.jpg'
 
 def list_serial_ports():
     ports = serial.tools.list_ports.comports()
@@ -30,6 +31,44 @@ def send_file(serial_port, file_path):
             # Allow some time for connection
             time.sleep(1) 
             
+            # --- Protocol: 1. Send Filename (With Fallback) ---
+            filename = os.path.basename(file_path)
+            # Use MMDDHHMM.jpg to ensure 8.3 compatibility (Max 8 chars filename)
+            timestamp_name = datetime.now().strftime("%m%d%H%M.jpg")
+            attempts = [(filename, "Original"), (timestamp_name, "Timestamp Fallback")]
+            
+            transfer_started = False
+            
+            for name_to_send, label in attempts:
+                header = f"START:{name_to_send}".encode('utf-8')
+                print(f"Sending Command ({label}): {header}")
+                ser.write(header)
+                
+                # Wait for ACK
+                print("Waiting for ACK...")
+                ack_received = False
+                start_wait = time.time()
+                while (time.time() - start_wait) < 5: 
+                    if ser.in_waiting > 0:
+                        resp = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                        if "OK" in resp:
+                            ack_received = True
+                            print(f"ACK Received for '{name_to_send}'! Starting Transfer...")
+                            break
+                        if "ERR" in resp:
+                             print(f"Device rejected filename '{name_to_send}'.")
+                             break # Try next or fail
+                    time.sleep(0.01)
+                
+                if ack_received:
+                    transfer_started = True
+                    break
+            
+            if not transfer_started:
+                print("Failed to initialize file transfer (Device rejected all attempts). Aborting.")
+                return
+
+            # --- Protocol: 3. Send Data ---
             start_time = time.time()
             bytes_sent = 0
             
@@ -40,7 +79,6 @@ def send_file(serial_port, file_path):
                         break
                     
                     ser.write(chunk)
-                    # ser.flush()
                     bytes_sent += len(chunk)
                     
                     # Calculate progress
@@ -48,9 +86,7 @@ def send_file(serial_port, file_path):
                     sys.stdout.write(f"\rProgress: {progress:.1f}% ({bytes_sent}/{file_size} bytes)")
                     sys.stdout.flush()
                     
-                    # Delay to prevent buffer overflow on the device
-                    # Even though USB is fast, SD Card write speed via SPI is the bottleneck.
-                    # 4KB write takes ~10-50ms depending on card/driver.
+                    # Delay to prevent buffer overflow
                     time.sleep(0.05) 
                     
             end_time = time.time()
