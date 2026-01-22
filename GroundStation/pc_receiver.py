@@ -222,7 +222,7 @@ class GroundStation:
             with open(filename, "wb") as f:
                 f.write(self.current_img_data)
             
-            print(f"   IMAGE SAVED: {filename}")
+            print(f"\n   IMAGE SAVED: {filename}")
             if self.expected_size > 0:
                 loss = 100 * (1 - len(self.current_img_data) / self.expected_size)
                 if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
