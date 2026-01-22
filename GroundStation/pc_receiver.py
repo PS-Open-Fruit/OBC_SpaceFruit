@@ -100,7 +100,7 @@ class GroundStation:
                     
                 elif cmd in ['c', 'capture']:
                     self.send_kiss_command(0x12) # 0x12 = Capture
-                    print("REQUESTED CAPTURE...")
+                    print("   REQUESTED CAPTURE...")
 
             except KeyboardInterrupt:
                 self.running = False
@@ -207,7 +207,7 @@ class GroundStation:
             try:
                 parts = text.split("Size: ")[1].split(" ")
                 self.expected_size = int(parts[0])
-                print(f"\n📥 INCOMING IMAGE: {self.expected_size/1024:.2f} KB")
+                print(f"   INCOMING IMAGE: {self.expected_size/1024:.2f} KB")
                 
                 self.downloading = True
                 self.current_img_data = bytearray()
@@ -222,7 +222,7 @@ class GroundStation:
             with open(filename, "wb") as f:
                 f.write(self.current_img_data)
             
-            print(f"\n✅ IMAGE SAVED: {filename}")
+            print(f"   IMAGE SAVED: {filename}")
             if self.expected_size > 0:
                 loss = 100 * (1 - len(self.current_img_data) / self.expected_size)
                 if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
