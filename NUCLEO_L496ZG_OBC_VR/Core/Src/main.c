@@ -420,13 +420,16 @@ void OBC_Process_Loop(void) {
              }
              // Handle Status Response (0x11)
              else if (cmd_id == 0x11) {
-                 // Payload: [0x11] [CPU:1] [Temp:4] [RAM:2]
-                 if (dec_len >= 8) {
+                 // Payload: [0x11] [CPU:1] [Temp:4] [RAM:2] [Disk:4]
+                 if (dec_len >= 12) {
                      uint8_t cpu = decoded[1];
                      float temp;
                      uint16_t ram;
+                     uint32_t disk;
+                     
                      memcpy(&temp, &decoded[2], 4);
                      memcpy(&ram, &decoded[6], 2);
+                     memcpy(&disk, &decoded[8], 4);
                      
                      // Manual Float-to-Int conversion to avoid %f linker issues
                      int t_int = (int)temp;
@@ -434,7 +437,7 @@ void OBC_Process_Loop(void) {
                      if (t_dec < 0) t_dec = -t_dec; // Handle negative decimals
                      
                      // Print Formatted String (This goes to LPUART1 -> PC)
-                     printf("[OBC] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB\r\n", cpu, t_int, t_dec, ram);
+                     printf("[OBC] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB | Disk: %lu MB\r\n", cpu, t_int, t_dec, ram, disk);
                  }
              }
              // Handle Image Chunk (0x13)

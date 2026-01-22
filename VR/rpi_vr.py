@@ -48,6 +48,14 @@ def get_free_ram():
     except:
         return 256
 
+def get_disk_free():
+    """Returns filesystem free space in MB."""
+    try:
+        s = os.statvfs('/')
+        return (s.f_bavail * s.f_frsize) // (1024 * 1024)
+    except:
+        return 0
+
 # ==========================================
 # 3. VR Simulator Logic
 # ==========================================
@@ -165,9 +173,12 @@ class RPiVRSimulator:
             cpu = int(get_cpu_load())
             temp = get_rpi_temp()
             ram = get_free_ram()
+            disk = get_disk_free()
+            
             # Prepend 0x11 Command ID so OBC can identify it
             resp = bytearray([0x11])
-            resp.extend(struct.pack("<BfH", cpu, temp, ram))
+            # Added 'I' (uint32) for Disk
+            resp.extend(struct.pack("<BfHI", cpu, temp, ram, disk))
             
         elif cmd_id == 0x12: # Capture
             self.img_counter += 1
