@@ -4,61 +4,20 @@ import time
 import random
 import os
 import subprocess
+import sys
+
+# Add Shared library path (two levels up)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+try:
+    from Shared.Python.kiss_protocol import KISSProtocol
+except ImportError:
+    # Fallback to handle running locally/different env
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+    from Shared.Python.kiss_protocol import KISSProtocol
 
 # ==========================================
-# 1. Protocol Definitions
+# 1. Protocol Definitions (Moved to Shared Lib)
 # ==========================================
-
-class EPSProtocol:
-    FEND = 0xC0
-    FESC = 0xDB
-    TFEND = 0xDC
-    TFESC = 0xDD
-    HEADER = 0x00
-
-    @staticmethod
-    def escape(data: bytes) -> bytes:
-        output = bytearray()
-        for byte in data:
-            if byte == EPSProtocol.FEND:
-                output.extend([EPSProtocol.FESC, EPSProtocol.TFEND])
-            elif byte == EPSProtocol.FESC:
-                output.extend([EPSProtocol.FESC, EPSProtocol.TFESC])
-            else:
-                output.append(byte)
-        return bytes(output)
-
-    @staticmethod
-    def unescape(data: bytes) -> bytes:
-        output = bytearray()
-        i = 0
-        while i < len(data):
-            byte = data[i]
-            if byte == EPSProtocol.FESC:
-                i += 1
-                if i >= len(data): break
-                if data[i] == EPSProtocol.TFEND:
-                    output.append(EPSProtocol.FEND)
-                elif data[i] == EPSProtocol.TFESC:
-                    output.append(EPSProtocol.FESC)
-            else:
-                output.append(byte)
-            i += 1
-        return bytes(output)
-
-    @staticmethod
-    def wrap_frame(payload: bytes) -> bytes:
-        frame = bytearray([EPSProtocol.FEND, EPSProtocol.HEADER])
-        frame.extend(EPSProtocol.escape(payload))
-        frame.append(EPSProtocol.FEND)
-        return bytes(frame)
-
-    @staticmethod
-    def unwrap_frame(frame: bytes) -> bytes:
-        if len(frame) < 3: return None
-        inner = frame[1:-1]
-        if inner[0] != EPSProtocol.HEADER: return None
-        return EPSProtocol.unescape(inner[1:])
 
 # ==========================================
 # 2. Hardware Access (Real RPi Data)
@@ -121,12 +80,14 @@ class RPiVRSimulator:
         
         try:
             print(f"   📸 Capturing: {filename}...")
-            # Run command, suppress stdout/stderr to keep terminal clean
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Run command, suppress stdout/stderr to keep terminal clean, timeout after 5s
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
             
             if os.path.exists(filename):
                 self.last_captured_file = filename
                 return os.path.getsize(filename)
+        except subprocess.TimeoutExpired:
+            print("   ❌ Camera Timed Out!")
         except Exception as e:
             print(f"   ❌ Camera Error: {e}")
             
@@ -166,8 +127,8 @@ class RPiVRSimulator:
                     
                     while True:
                         try:
-                            start = buffer.index(EPSProtocol.FEND)
-                            end = buffer.index(EPSProtocol.FEND, start + 1)
+                            start = buffer.index(KISSProtocol.FEND)
+                            end = buffer.index(KISSProtocol.FEND, start + 1)
                             frame = buffer[start : end + 1]
                             del buffer[:end + 1]
                             
@@ -181,7 +142,13 @@ class RPiVRSimulator:
                 return
 
     def handle_frame(self, frame_bytes):
-        payload = EPSProtocol.unwrap_frame(frame_bytes)
+        result = KISSProtocol.unwrap_frame(frame_bytes)
+        if not result: return 
+        
+        kiss_cmd, payload = result
+        if kiss_cmd != KISSProtocol.CMD_DATA:
+            return
+
         if not payload: return
 
         cmd_id = payload[0]
@@ -230,14 +197,8 @@ class RPiVRSimulator:
             # Attempt Real Capture
             size = self.capture_real_image(self.img_counter)
             
-            # Fallback to simulation if capture failed (or if you want to test without camera)
             if size == 0:
-                print("   ⚠️ Capture failed (or no camera). Sending simulated size.")
-                size = random.randint(50000, 200000)
-                # Create dummy file for download test
-                self.last_captured_file = "dummy_img.jpg"
-                with open(self.last_captured_file, "wb") as f:
-                    f.write(os.urandom(size))
+                print("   ⚠️ Capture failed (or no camera). Sending size 0.")
             
             # Response: [0x12 (Cmd ID)] [ImgID (2b)] [Size (4b)]
             resp = bytearray([0x12])
@@ -268,7 +229,7 @@ class RPiVRSimulator:
                 resp = b'' # Error or no image
 
         if resp:
-            tx = EPSProtocol.wrap_frame(resp)
+            tx = KISSProtocol.wrap_frame(resp)
             self.serial_conn.write(tx)
 
 if __name__ == "__main__":
