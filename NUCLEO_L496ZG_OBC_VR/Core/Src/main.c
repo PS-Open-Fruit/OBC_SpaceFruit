@@ -48,6 +48,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CRC_HandleTypeDef hcrc;
+
 UART_HandleTypeDef hlpuart1;
 
 /* USER CODE BEGIN PV */
@@ -70,6 +72,7 @@ volatile uint8_t is_frame_ready = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
+static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer);
 uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload);
@@ -113,6 +116,7 @@ int main(void)
   MX_GPIO_Init();
   MX_LPUART1_UART_Init();
   MX_USB_DEVICE_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
   printf("[OBC] System Booted. VCP Active.\r\n");
   HAL_UART_Receive_IT(&hlpuart1, &uart_rx_char, 1);
@@ -188,6 +192,37 @@ void SystemClock_Config(void)
   /** Enable MSI Auto calibration
   */
   HAL_RCCEx_EnableMSIPLLMode();
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
 }
 
 /**
