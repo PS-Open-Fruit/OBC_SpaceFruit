@@ -2,6 +2,9 @@
 CAD.formats=
 CAD.pinconfig=
 CAD.provider=
+CRC.IPParameters=OutputDataInversionMode,InputDataInversionMode
+CRC.InputDataInversionMode=CRC_INPUTDATA_INVERSION_BYTE
+CRC.OutputDataInversionMode=CRC_OUTPUTDATA_INVERSION_ENABLE
 File.Version=6
 KeepUserPlacement=false
 LPUART1.BaudRate=9600

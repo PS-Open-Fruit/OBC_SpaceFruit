@@ -3,6 +3,7 @@ import threading
 import time
 import sys
 import os
+import struct
 
 # Import KISS Protocol
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -155,16 +156,36 @@ class GroundStation:
         """Unescapes and handles KISS payload."""
         payload = KISSProtocol.unescape(escaped_data)
         
-        if len(payload) == 0: return
+        # Space Ready Format (CRC-32): [CMD:1] [ChunkID:2] [Data:N] [CRC:4]
+        # Min size = 1 + 2 + 0 + 4 = 7 bytes
+        if len(payload) < 7: return 
         
-        # Check Command Byte (SLIP_Encode in C adds 0x00 at start)
         cmd_byte = payload[0]
-        data = payload[1:]
+        if cmd_byte != 0x00: return # Only handle commands
+
+        # Payload (excl cmd) is: [ChunkID + Data + CRC]
+        payload_no_cmd = payload[1:]
+        data_to_check = payload_no_cmd[:-4] # Exclude CRC-32 (last 4 bytes)
+        received_crc_bytes = payload_no_cmd[-4:]
         
-        if cmd_byte == 0x00 and len(data) > 0:
-             # This is Image Data
-             self.current_img_data.extend(data)
-             self.print_progress()
+        # Decode CRC-32 (Little Endian)
+        received_crc = struct.unpack('<I', received_crc_bytes)[0]
+        
+        # Calculate Local CRC
+        calc_crc = KISSProtocol.calculate_crc(data_to_check)
+        
+        if calc_crc != received_crc:
+            print(f"⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X}")
+            return
+            
+        # Extract Data
+        # ChunkID (2 bytes)
+        chunk_id = data_to_check[0] | (data_to_check[1] << 8)
+        img_chunk = data_to_check[2:]
+        
+        # Append
+        self.current_img_data.extend(img_chunk)
+        self.print_progress()
 
     def process_log_line(self, text):
         """Parses ASCII log lines."""

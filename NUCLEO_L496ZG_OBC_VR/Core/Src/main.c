@@ -212,8 +212,8 @@ static void MX_CRC_Init(void)
   hcrc.Instance = CRC;
   hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
   hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
-  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
-  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_BYTE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_ENABLE;
   hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
   if (HAL_CRC_Init(&hcrc) != HAL_OK)
   {
@@ -424,16 +424,32 @@ void OBC_Process_Loop(void) {
                      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
                      // SEND COMPLIANT KISS PROTOCOL FRAME (OBC -> GS)
-                    // Packet: [FEND] [0x00] [Escaped Data] [FEND]
-                    // Buffer size: Max chunk ~512 needs ~1024 for worst-case escaping
-                    uint8_t kiss_tx_buffer[1024];
-                    uint16_t kiss_len = SLIP_Encode(raw_data, data_len, kiss_tx_buffer);
-                    HAL_UART_Transmit(&hlpuart1, kiss_tx_buffer, kiss_len, 2000);
+                     // Packet Format: [FEND] [0x00] [Escaped Payload] [FEND]
+                     // Payload Format: [ChunkID:2] [Data:N] [CRC:2]
                      
-                     // Advance
-                     next_chunk_to_req++;
+                     // 1. Construct Raw Payload (ChunkID + Data)
+                     uint8_t payload_buffer[600];
+                     payload_buffer[0] = chunk_id & 0xFF;
+                     payload_buffer[1] = (chunk_id >> 8) & 0xFF;
+                     memcpy(&payload_buffer[2], raw_data, data_len);
                      
-                     // Stop condition (Empty chunk or small chunk means EOF)
+                     uint16_t current_payload_len = 2 + data_len;
+
+                     // 2. Append CRC-32 (Hardware - STM32L4)
+                     // ZLIB CRC32 Standard: XOR output with 0xFFFFFFFF
+                     uint32_t crc_hw = HAL_CRC_Calculate(&hcrc, (uint32_t*)payload_buffer, current_payload_len);
+                     crc_hw ^= 0xFFFFFFFF; 
+
+                     payload_buffer[current_payload_len++] = crc_hw & 0xFF;
+                     payload_buffer[current_payload_len++] = (crc_hw >> 8) & 0xFF;
+                     payload_buffer[current_payload_len++] = (crc_hw >> 16) & 0xFF;
+                     payload_buffer[current_payload_len++] = (crc_hw >> 24) & 0xFF;
+
+                     // 3. Encode (Escapes + FENDs)
+                     uint8_t kiss_tx_buffer[1200];
+                     uint16_t kiss_len = SLIP_Encode(payload_buffer, current_payload_len, kiss_tx_buffer);
+                     
+                     HAL_UART_Transmit(&hlpuart1, kiss_tx_buffer, kiss_len, 2000);
                      if (data_len < 200) { 
                          printf("[OBC] Download Complete!\r\n");
                          download_active = 0;

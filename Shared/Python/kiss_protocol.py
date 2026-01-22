@@ -1,3 +1,5 @@
+import zlib
+
 class KISSProtocol:
     """
     Implements the KISS (Keep It Simple, Stupid) Protocol for serial communication.
@@ -17,6 +19,14 @@ class KISSProtocol:
     CMD_FULLDUPLEX = 0x05
     CMD_SETHARDWARE = 0x06
     CMD_RETURN = 0xFF
+
+    @staticmethod
+    def calculate_crc(data: bytes) -> int:
+        """
+        Calculates CRC-32 (Standard Ethernet/Zlib).
+        Matches STM32 Hardware CRC default.
+        """
+        return zlib.crc32(data) & 0xFFFFFFFF
 
     @classmethod
     def escape(cls, data: bytes) -> bytes:
@@ -82,11 +92,12 @@ class KISSProtocol:
         # Extract inner content (removing FENDs)
         inner = frame[1:-1]
         
-        if len(inner) < 1:
+        # Unescape
+        try:
+            unescaped = cls.unescape(inner)
+        except Exception:
             return None
             
-        command_byte = inner[0]
-        # The rest is the escaped payload
-        payload = cls.unescape(inner[1:])
+        if len(unescaped) < 1: return None
         
-        return command_byte, payload
+        return (unescaped[0], unescaped[1:])
