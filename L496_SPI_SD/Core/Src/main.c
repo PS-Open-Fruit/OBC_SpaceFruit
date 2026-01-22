@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -46,17 +47,25 @@ UART_HandleTypeDef hlpuart1;
 
 SPI_HandleTypeDef hspi1;
 
-PCD_HandleTypeDef hpcd_USB_OTG_FS;
-
 /* USER CODE BEGIN PV */
+#define DB_SIZE 4096
+uint8_t rxBufferA[DB_SIZE];
+uint8_t rxBufferB[DB_SIZE];
+volatile uint32_t rxIndex = 0;
+volatile uint8_t activeBufferIdx = 0; // 0 = A, 1 = B
+volatile uint8_t bufferA_Ready = 0;
+volatile uint8_t bufferB_Ready = 0;
+volatile uint8_t bufferOverrun = 0;
+uint8_t rxTempByte;
 
+volatile uint32_t lastByteTime = 0;
+volatile uint32_t totalBytesReceived = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
-static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
@@ -97,9 +106,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_LPUART1_UART_Init();
-  MX_USB_OTG_FS_PCD_Init();
   MX_SPI1_Init();
   MX_FATFS_Init();
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   //some variables for FatFs
     FATFS FatFs; 	//Fatfs handle
@@ -214,102 +223,124 @@ int main(void)
     }
     // --------------------
 
-    // --- 3MB Experiment ---
-    printf("Starting 3MB Data Experiment (Writing 3MB to SD)...\r\n");
+    // --- USB CDC Image Receive Experiment ---
+    printf("Starting Image Rx Experiment (USB CDC)...\r\n");
+    printf("Waiting for data via USB CDC (COMx)...\r\n");
     
-    // Use a larger buffer for performance (e.g. 4KB)
-    // We allocate it static to avoid stack overflow, or strictly inside a function if stack allows.
-    // L496ZG has plenty of RAM/Stack usually, but static is safer.
-    static uint8_t bigBuffer[4096]; 
-    const uint32_t TARGET_SIZE = 3 * 1024 * 1024; // 3 MB
-    uint32_t totalWritten = 0;
-    uint32_t startTime, endTime;
+    // Externs from usbd_cdc_if.c
+    extern uint8_t UserRxBufferFS_A[];
+    extern uint8_t UserRxBufferFS_B[];
+    extern volatile uint8_t Buffer_A_Ready;
+    extern volatile uint8_t Buffer_B_Ready;
+    extern volatile uint32_t Buffer_A_Length;
+    extern volatile uint32_t Buffer_B_Length;
+    extern void CDC_Buffer_Processed(uint8_t buffer_id);
+
+    // Reset Globals
+    totalBytesReceived = 0;
+    uint32_t lastHeartbeat = 0;
+    lastByteTime = HAL_GetTick();
     
-    // Fill buffer with dummy data pattern
-    for(int i=0; i<4096; i++) bigBuffer[i] = (uint8_t)(i % 256);
+    // Ensure flags are clear
+    Buffer_A_Ready = 0;
+    Buffer_B_Ready = 0;
     
-    fres = f_open(&fil, "data_3mb.bin", FA_WRITE | FA_CREATE_ALWAYS);
-    if(fres == FR_OK) {
-        printf("File 'data_3mb.bin' opened. Writing...\r\n");
-        startTime = HAL_GetTick();
-        
-        while(totalWritten < TARGET_SIZE) {
-            UINT bw;
-            fres = f_write(&fil, bigBuffer, sizeof(bigBuffer), &bw);
-            if(fres != FR_OK || bw == 0) {
-                printf("Write error at %lu bytes. Error: %d\r\n", totalWritten, fres);
-                break;
-            }
-            totalWritten += bw;
-            
-            // Toggle LED every ~1MB to show activity (optional)
-            if((totalWritten % (1024*1024)) < sizeof(bigBuffer)) {
-                 HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-            }
-        }
-        
-        endTime = HAL_GetTick();
-        f_close(&fil);
-        
-        // Calculate duration in milliseconds
-        uint32_t duration_ms = endTime - startTime;
-        if (duration_ms == 0) duration_ms = 1; // Prevent division by zero
-
-        // Calculate Time (Seconds.Centiseconds)
-        uint32_t time_sec = duration_ms / 1000;
-        uint32_t time_centisec = (duration_ms % 1000) / 10; 
-
-        // Calculate Speed (KB/s) using integer arithmetic
-        // Speed = (Bytes / 1024) / (ms / 1000) = (Bytes * 1000) / (1024 * ms)
-        // Multiply by 100 first to keep 2 decimal places of precision for printing
-        // Use uint64_t to prevent overflow during multiplication: 3MB * 100000 approx 3*10^11 fits in uint64
-        uint64_t speed_calc = ((uint64_t)totalWritten * 1000 * 100) / ((uint64_t)1024 * duration_ms);
-        uint32_t speed_int = (uint32_t)(speed_calc / 100);
-        uint32_t speed_frac = (uint32_t)(speed_calc % 100);
-
-        printf("3MB Experiment Complete.\r\n");
-        printf("Wrote: %lu bytes\r\n", totalWritten);
-        printf("Time: %lu.%02lu s\r\n", time_sec, time_centisec);
-        printf("Speed: %lu.%02lu KB/s\r\n", speed_int, speed_frac);
-        
+    fres = f_open(&fil, "image.png", FA_WRITE | FA_CREATE_ALWAYS);
+    if(fres != FR_OK) {
+         printf("Failed to create 'image.png' (Error %d)\r\n", fres);
     } else {
-        printf("Failed to open 'data_3mb.bin' (Error %d)\r\n", fres);
+         // Wait for first byte up to 30 seconds
+         printf("Waiting for data stream...\r\n");
+         while(totalBytesReceived == 0) {
+              // Check if any buffer became ready to detect start
+              if(Buffer_A_Ready || Buffer_B_Ready) {
+                  break;
+              }
+             
+              if((HAL_GetTick() - lastByteTime) > 30000) {
+                 printf("Timeout waiting for start. (Received 0 bytes)\r\n");
+                 break;
+              }
+              // Heartbeat on LD3 (Red)
+              if((HAL_GetTick() - lastHeartbeat) > 500) {
+                  HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+                  lastHeartbeat = HAL_GetTick();
+              }
+         }
+         
+         if(Buffer_A_Ready || Buffer_B_Ready) {
+             printf("Data detected! Receiving...\r\n");
+             uint32_t startTime = HAL_GetTick();
+             lastByteTime = HAL_GetTick();
+             // Ensure Red LED is OFF during transfer
+             HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+             
+             while(1) {
+                 uint8_t activity = 0;
+                 
+                 // Check if A is ready
+                 if(Buffer_A_Ready) {
+                     UINT bw;
+                     fres = f_write(&fil, UserRxBufferFS_A, Buffer_A_Length, &bw);
+                     if(fres != FR_OK) printf("Write A Error: %d\r\n", fres);
+                     
+                     totalBytesReceived += Buffer_A_Length;
+                     lastByteTime = HAL_GetTick();
+                     
+                     // Toggle LED2 (Blue) for activity
+                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                     
+                     // Signal that buffer is processed
+                     CDC_Buffer_Processed(0); 
+                     activity = 1;
+                 }
+                 
+                 // Check if B is ready
+                 if(Buffer_B_Ready) {
+                     UINT bw;
+                     fres = f_write(&fil, UserRxBufferFS_B, Buffer_B_Length, &bw);
+                     if(fres != FR_OK) printf("Write B Error: %d\r\n", fres);
+                     
+                     totalBytesReceived += Buffer_B_Length;
+                     lastByteTime = HAL_GetTick();
+                     
+                     // Toggle LED2 (Blue) for activity
+                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                     
+                     // Signal that buffer is processed
+                     CDC_Buffer_Processed(1);
+                     activity = 1;
+                 }
+                 
+                 // Timeout / Idle Detection (2 seconds)
+                 if (!activity && (HAL_GetTick() - lastByteTime) > 2000) {
+                     printf("\r\nEnd of transmission detected (Timeout 2s).\r\n");
+                     break;
+                 }
+             }
+             
+             uint32_t endTime = HAL_GetTick();
+             f_close(&fil);
+             
+             uint32_t duration_ms = endTime - startTime;
+             if (duration_ms == 0) duration_ms = 1;
+             
+             uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
+             uint32_t speed_int = (uint32_t)(speed_calc / 100);
+             uint32_t speed_frac = (uint32_t)(speed_calc % 100);
+             
+             printf("Received & Saved: %lu bytes\r\n", totalBytesReceived);
+             printf("Time: %lu ms\r\n", duration_ms);
+             printf("Speed: %lu.%02lu KB/s\r\n", speed_int, speed_frac);
+             
+         } else {
+             f_close(&fil);
+             // f_unlink("image.png"); // KEEP FILE FOR DEBUG
+             printf("Closed empty 'image.png' due to timeout.\r\n");
+         }
     }
+    // ----------------------
 
-    // --- Verify 3MB ---
-    printf("Verifying 3MB data...\r\n");
-    fres = f_open(&fil, "data_3mb.bin", FA_READ);
-    if(fres == FR_OK) {
-        uint32_t totalRead = 0;
-        uint32_t errors = 0;
-        while(totalRead < TARGET_SIZE) {
-            UINT br;
-            // Clear buffer before read to ensure we are reading new data? 
-            // Actually we want to compare. We can read into a temp verify buffer?
-            // Or overwrite bigBuffer and check? 
-            // If we overwrite bigBuffer, we lose the reference pattern.
-            // But the reference pattern is simple (i % 256).
-            // So we can regenerate it on the fly or just check it.
-            
-            fres = f_read(&fil, bigBuffer, sizeof(bigBuffer), &br);
-            if(fres != FR_OK || br == 0) break;
-            
-            for(unsigned int i=0; i<br; i++) {
-                if(bigBuffer[i] != (uint8_t)(i % 256)) {
-                    // Logic error: buffer index vs absolute index pattern?
-                    // No, I filled buffer with (i % 256). So every chunk is identical.
-                    // So checking against (i % 256) is correct.
-                    errors++;
-                }
-            }
-            totalRead += br;
-        }
-        f_close(&fil);
-        if(errors == 0) printf("Verification Successful! 3MB match.\r\n");
-        else printf("Verification Failed! %lu errors found.\r\n", errors);
-    } else {
-        printf("Failed to open 'data_3mb.bin' for verify.\r\n");
-    }
     // ------------------
 
     //We're done, so de-mount the drive
@@ -405,8 +436,8 @@ static void MX_LPUART1_UART_Init(void)
 
   /* USER CODE END LPUART1_Init 1 */
   hlpuart1.Instance = LPUART1;
-  hlpuart1.Init.BaudRate = 209700;
-  hlpuart1.Init.WordLength = UART_WORDLENGTH_7B;
+  hlpuart1.Init.BaudRate = 115200;
+  hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
   hlpuart1.Init.StopBits = UART_STOPBITS_1;
   hlpuart1.Init.Parity = UART_PARITY_NONE;
   hlpuart1.Init.Mode = UART_MODE_TX_RX;
@@ -460,41 +491,6 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_PCD_Init(void)
-{
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
-
-  /* USER CODE END USB_OTG_FS_Init 0 */
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
-
-  /* USER CODE END USB_OTG_FS_Init 1 */
-  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
-  hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
-  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
-  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
-  hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.battery_charging_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
-  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
-  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
-
-  /* USER CODE END USB_OTG_FS_Init 2 */
 
 }
 
@@ -567,14 +563,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-PUTCHAR_PROTOTYPE
-{
-  /* Place your implementation of fputc here */
-  /* e.g. write a character to the USART1 and Loop until the end of transmission */
-  HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
 
-  return ch;
-}
 /* USER CODE END 4 */
 
 /**
