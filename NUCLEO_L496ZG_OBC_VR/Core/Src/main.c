@@ -349,14 +349,24 @@ void OBC_Log(const char *fmt, ...) {
     va_end(args);
 
     uint16_t msg_len = strlen(buf);
-    // Frame Format: [0x01] [ASCII Message]
+    // Frame Format: [0x01] [ASCII Message] [CRC32]
     uint8_t payload[300];
     payload[0] = 0x01; // Log Command ID
     if (msg_len > 250) msg_len = 250; 
     memcpy(&payload[1], buf, msg_len);
+    
+    // Calculate CRC (CMD + Content)
+    uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)payload, msg_len + 1);
+    crc ^= 0xFFFFFFFF; // Inverse for Standard CRC32
+    
+    uint16_t p_idx = msg_len + 1;
+    payload[p_idx++] = crc & 0xFF;
+    payload[p_idx++] = (crc >> 8) & 0xFF;
+    payload[p_idx++] = (crc >> 16) & 0xFF;
+    payload[p_idx++] = (crc >> 24) & 0xFF;
 
     uint8_t tx_frame[600];
-    uint16_t enc_len = SLIP_Encode(payload, msg_len + 1, tx_frame);
+    uint16_t enc_len = SLIP_Encode(payload, p_idx, tx_frame);
     HAL_UART_Transmit(&hlpuart1, tx_frame, enc_len, 1000);
 }
 
@@ -384,9 +394,18 @@ uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer) {
 
 // --- SLIP Decoder ---
 uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
-    if (len < 3) return 0;
-    if (frame[0] != FEND || frame[len-1] != FEND) return 0;
-    if (frame[1] != 0x00) return 0; // Invalid Header
+    if (len < 3) {
+        OBC_Log("[OBC] SLIP Error: Frame too short (%d)", len);
+        return 0;
+    }
+    if (frame[0] != FEND || frame[len-1] != FEND) {
+        OBC_Log("[OBC] SLIP Error: Missing FEND markers");
+        return 0;
+    }
+    if (frame[1] != 0x00) {
+        OBC_Log("[OBC] SLIP Error: Invalid Header 0x%02X (Expected 0x00)", frame[1]);
+        return 0; 
+    }
     
     uint16_t out_idx = 0;
     for (uint16_t i = 2; i < len - 1; i++) {
@@ -409,12 +428,27 @@ void OBC_Process_Loop(void) {
     static uint16_t next_chunk_to_req = 0;
     static uint8_t download_active = 0;
     
-    // 1. Process Received Packets (Reading Buffer B)
+    // 1. Process Received Packets (VR Simulator - Buffer B)
     if (is_frame_ready) {
         uint8_t decoded[512]; // Increased buffer size
         uint16_t dec_len = SLIP_Decode(app_process_buffer, app_process_len, decoded);
         
-        if (dec_len > 0) {
+        // Validate CRC (Min Size: 1 CMD + 4 CRC = 5)
+        uint8_t crc_ok = 0;
+        if (dec_len >= 5) {
+             uint32_t rx_crc;
+             memcpy(&rx_crc, &decoded[dec_len-4], 4);
+             
+             uint32_t calc_crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)decoded, dec_len-4);
+             calc_crc ^= 0xFFFFFFFF;
+             
+             if (calc_crc == rx_crc) crc_ok = 1;
+             else OBC_Log("[OBC] VR CRC Fail: Rx %08X vs Calc %08X", rx_crc, calc_crc);
+        } else if (dec_len > 0) {
+             OBC_Log("[OBC] VR Error: Payload too short (%d)", dec_len);
+        }
+
+        if (crc_ok) {
              uint8_t cmd_id = decoded[0];
              
              // Check for PONG (0x10) - Framed Response
@@ -434,9 +468,14 @@ void OBC_Process_Loop(void) {
                  next_chunk_to_req = 0;
 
                  // Kickstart download immediately
-                 uint8_t req[4] = {0x00, 0x13, 0x00, 0x00}; // Prepend 0x00 for VR Data Frame
-                 uint8_t tx_frame[16];
-                 uint16_t len = SLIP_Encode(req, 4, tx_frame);
+                 // REQ: [0x00] [0x13] [0x00] [0x00] (Chunk 0) + CRC
+                 uint8_t req[8] = {0x00, 0x13, 0x00, 0x00, 0, 0, 0, 0};
+                 uint32_t crc_req = HAL_CRC_Calculate(&hcrc, (uint32_t*)req, 4);
+                 crc_req ^= 0xFFFFFFFF;
+                 memcpy(&req[4], &crc_req, 4);
+
+                 uint8_t tx_frame[32];
+                 uint16_t len = SLIP_Encode(req, 8, tx_frame);
                  CDC_Transmit_FS(tx_frame, len);
              }
              // Handle Status Response (0x11)
@@ -488,8 +527,8 @@ void OBC_Process_Loop(void) {
                      uint16_t current_payload_len = 3 + data_len;
 
                      // 2. Append CRC-32 (Hardware - STM32L4)
-                     // Checksum over ChunkID + Data (Excluding CMD 0x00)
-                     uint32_t crc_hw = HAL_CRC_Calculate(&hcrc, (uint32_t*)&payload_buffer[1], current_payload_len - 1);
+                     // Checksum over CMD + ChunkID + Data
+                     uint32_t crc_hw = HAL_CRC_Calculate(&hcrc, (uint32_t*)payload_buffer, current_payload_len);
                      crc_hw ^= 0xFFFFFFFF; 
 
                      payload_buffer[current_payload_len++] = crc_hw & 0xFF;
@@ -513,15 +552,19 @@ void OBC_Process_Loop(void) {
                          OBC_Log("[OBC] Download Complete!");
                          download_active = 0;
                      } else {
-                         // REQ NEXT CHUNK
-                         uint8_t req[4];
+                         // REQ NEXT CHUNK (CRC Included)
+                         uint8_t req[8];
                          req[0] = 0x00; // KISS Data
                          req[1] = 0x13;
                          req[2] = next_chunk_to_req & 0xFF;
                          req[3] = (next_chunk_to_req >> 8) & 0xFF;
                          
-                         uint8_t tx_frame[16];
-                         uint16_t len = SLIP_Encode(req, 4, tx_frame);
+                         uint32_t crc_next = HAL_CRC_Calculate(&hcrc, (uint32_t*)req, 4);
+                         crc_next ^= 0xFFFFFFFF;
+                         memcpy(&req[4], &crc_next, 4);
+
+                         uint8_t tx_frame[32];
+                         uint16_t len = SLIP_Encode(req, 8, tx_frame);
                          CDC_Transmit_FS(tx_frame, len);
                      }
                  }
@@ -539,27 +582,57 @@ void OBC_Process_Loop(void) {
         uint8_t decoded_gs[512];
         uint16_t dec_len = SLIP_Decode(gs_app_buffer, gs_app_len, decoded_gs);
         
-        if (dec_len > 0) {
+        // Validate CRC (GS -> OBC)
+        uint8_t gs_crc_ok = 0;
+        if (dec_len >= 5) {
+             uint32_t rx_crc;
+             memcpy(&rx_crc, &decoded_gs[dec_len-4], 4);
+             
+             uint32_t calc_crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)decoded_gs, dec_len-4);
+             calc_crc ^= 0xFFFFFFFF;
+             
+             if (calc_crc == rx_crc) gs_crc_ok = 1;
+             else OBC_Log("[OBC] GS CRC Fail: Rx %08X vs Calc %08X", rx_crc, calc_crc);
+        } else if (dec_len > 0) {
+             OBC_Log("[OBC] GS Error: Payload too short (%d)", dec_len);
+        }
+
+        if (gs_crc_ok) {
              uint8_t cmd_id = decoded_gs[0];
              
+             // Forward to VR (Wait! VR expects CRC too now!)
+             // We need to re-encode with CRC for VR Link
+             
              if (cmd_id == 0x12) { // Capture
-                 uint8_t cmd[2] = {0x00, 0x12}; // 0x00=KISS Data
+                 uint8_t cmd[6] = {0x00, 0x12, 0, 0, 0, 0}; // CMD + ID + CRC
+                 uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)cmd, 2);
+                 crc ^= 0xFFFFFFFF;
+                 memcpy(&cmd[2], &crc, 4);
+                 
                  uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 2, tx);
+                 uint16_t len = SLIP_Encode(cmd, 6, tx);
                  CDC_Transmit_FS(tx, len);
                  OBC_Log("[OBC] GS CMD: Capture!");
              }
              else if (cmd_id == 0x10) { // Ping
-                 uint8_t cmd[2] = {0x00, 0x10};
+                 uint8_t cmd[6] = {0x00, 0x10, 0, 0, 0, 0};
+                 uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)cmd, 2);
+                 crc ^= 0xFFFFFFFF;
+                 memcpy(&cmd[2], &crc, 4);
+
                  uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 2, tx);
+                 uint16_t len = SLIP_Encode(cmd, 6, tx);
                  CDC_Transmit_FS(tx, len);
                  OBC_Log("[OBC] GS CMD: Ping!");
              }
              else if (cmd_id == 0x20) { // Status Request
-                 uint8_t cmd[2] = {0x00, 0x11}; // Map to VR Status Cmd
+                 uint8_t cmd[6] = {0x00, 0x11, 0, 0, 0, 0}; // Map to VR Status Cmd
+                 uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)cmd, 2);
+                 crc ^= 0xFFFFFFFF;
+                 memcpy(&cmd[2], &crc, 4);
+
                  uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 2, tx);
+                 uint16_t len = SLIP_Encode(cmd, 6, tx);
                  CDC_Transmit_FS(tx, len);
                  OBC_Log("[OBC] GS CMD: Status Req!");
              }

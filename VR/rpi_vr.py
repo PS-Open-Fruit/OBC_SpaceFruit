@@ -154,13 +154,33 @@ class RPiVRSimulator:
         if not result: return 
         
         kiss_cmd, payload = result
+        # Note: kiss_cmd is the KISS Command Byte (usually 0x00 for Data)
+        
         if kiss_cmd != KISSProtocol.CMD_DATA:
             return
 
-        if not payload: return
+        # Min size: [CMD] [CRC:4] = 5 bytes
+        if not payload or len(payload) < 5: return
 
+        # Validate CRC (Must include KISS Command Byte 0x00)
+        # payload is [APP_CMD] [DATA] [CRC]
+        rx_crc_bytes = payload[-4:]
+        rx_crc = struct.unpack('<I', rx_crc_bytes)[0]
+        
+        # Reconstruct data covered by CRC: [KISS_CMD] + [APP_CMD] + [DATA]
+        data_to_check = bytearray([kiss_cmd]) + payload[:-4]
+        
+        calc_crc = KISSProtocol.calculate_crc(data_to_check)
+        if calc_crc != rx_crc:
+            print(f"   ⚠️ CRC Fail: Rx {rx_crc:08X} != Calc {calc_crc:08X}")
+            return
+            
+        # Dispatch
+        # payload[:-4] is [APP_CMD] [DATA]
         cmd_id = payload[0]
-        resp = b''
+        app_payload = payload[1:-4]
+
+        resp_payload = b''
 
         if cmd_id != 0x13:
             print(f"Cmd: 0x{cmd_id:02X}")
@@ -168,7 +188,7 @@ class RPiVRSimulator:
         # --- PAYLOAD SIMULATION (Actual Pi Data) ---
         if cmd_id == 0x10: # Ping
             # Response: [0x10] [0x01] (Framed Pong)
-            resp = bytearray([0x10, 0x01])
+            resp_payload = bytearray([0x10, 0x01])
             
         elif cmd_id == 0x11: # Status
             cpu = int(get_cpu_load())
@@ -176,10 +196,9 @@ class RPiVRSimulator:
             ram = get_free_ram()
             disk = get_disk_free()
             
-            # Prepend 0x11 Command ID so OBC can identify it
-            resp = bytearray([0x11])
-            # Added 'I' (uint32) for Disk
-            resp.extend(struct.pack("<BfHI", cpu, temp, ram, disk))
+            # Prepend 0x11 Command ID
+            resp_payload = bytearray([0x11])
+            resp_payload.extend(struct.pack("<BfHI", cpu, temp, ram, disk))
             
         elif cmd_id == 0x12: # Capture
             self.img_counter += 1
@@ -190,32 +209,25 @@ class RPiVRSimulator:
             if size == 0:
                 print("   ⚠️ Capture failed (or no camera). Sending size 0.")
             
-            # Response: [0x12 (Cmd ID)] [ImgID (2b)] [Size (4b)]
-            resp = bytearray([0x12])
-            resp.extend(struct.pack("<HI", self.img_counter, size))
+            # Response: [0x12] [ImgID] [Size]
+            resp_payload = bytearray([0x12])
+            resp_payload.extend(struct.pack("<HI", self.img_counter, size))
 
         elif cmd_id == 0x13: # Get Image Chunk
-            # Payload: [ChunkID (2 bytes)]
-            # Response: [ChunkID (2 bytes)] [Data (up to 200 bytes)]
-            if len(payload) >= 3 and self.last_captured_file:
-                chunk_id = struct.unpack("<H", payload[1:3])[0]
+            # Request Payload: [ChunkID (2 bytes)]
+            if len(app_payload) >= 2 and self.last_captured_file:
+                chunk_id = struct.unpack("<H", app_payload[0:2])[0]
                 CHUNK_SIZE = 200
                 
                 # Show progress
                 if self.last_file_size > 0:
                     total_chunks = (self.last_file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
-                    
-                    # Calculate percentage based on (chunk_id + 1) since chunk_id is 0-indexed
-                    percent = ((chunk_id + 1) / total_chunks) * 100
-                    
-                    # Print progress bar every 5 chunks or if it's the last one
                     is_last_chunk = (chunk_id >= total_chunks - 1)
                     if chunk_id % 5 == 0 or is_last_chunk:
+                        # calc percent
+                        percent = ((chunk_id + 1) / total_chunks) * 100
                         print(f"   📡 Transferring: {percent:.1f}% (Chunk {chunk_id + 1}/{total_chunks})", end='\r')
-                        
-                        if is_last_chunk:
-                            print() # Clear line/New line
-                            print("   ✅ Transfer Complete!")
+                        if is_last_chunk: print("\n   ✅ Transfer Complete!")
 
                 offset = chunk_id * CHUNK_SIZE
                 
@@ -225,18 +237,24 @@ class RPiVRSimulator:
                         data = f.read(CHUNK_SIZE)
                         
                         # Header: 0x13 + ChunkID
-                        resp = bytearray([0x13])
-                        resp.extend(struct.pack("<H", chunk_id))
-                        resp.extend(data)
+                        resp_payload = bytearray([0x13])
+                        resp_payload.extend(struct.pack("<H", chunk_id))
+                        resp_payload.extend(data)
                         
-                        # print(f"   Sent Chunk {chunk_id}, Len: {len(data)}") 
                 except Exception as e:
                     print(f"   Read Error: {e}")
-            else:
-                resp = b'' # Error or no image
 
-        if resp:
-            tx = KISSProtocol.wrap_frame(resp)
+        # Send Response (with CRC)
+        if resp_payload:
+            # 1. Calc CRC (Exclude KISS CMD 0x00 because main.c SLIP_Decode strips it from check)
+            crc = KISSProtocol.calculate_crc(resp_payload)
+            
+            # 2. Append CRC
+            full_payload = bytearray(resp_payload)
+            full_payload.extend(struct.pack('<I', crc))
+            
+            # 3. Wrap (KISS Command 0x00)
+            tx = KISSProtocol.wrap_frame(full_payload)
             self.serial_conn.write(tx)
 
 if __name__ == "__main__":

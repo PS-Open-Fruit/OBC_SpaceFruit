@@ -66,16 +66,27 @@ class GroundStation:
         self.cli_loop()
 
     def send_kiss_command(self, cmd_id):
-        """Sends a KISS-framed command to the OBC."""
+        """Sends a KISS-framed command to the OBC with CRC32."""
         if not self.ser or not self.ser.is_open: 
             print("❌ Serial Closed")
             return
         
-        # Wrap in KISS Frame
-        # Payload is just the Command ID (1 byte)
-        frame = KISSProtocol.wrap_frame(bytes([cmd_id]))
+        # Construct Payload: [APP_CMD]
+        app_payload = bytes([cmd_id])
+        
+        # Calculate CRC over Payload
+        crc = KISSProtocol.calculate_crc(app_payload)
+        crc_bytes = struct.pack('<I', crc)
+        
+        # Full Payload: [APP_CMD] [CRC]
+        full_payload = app_payload + crc_bytes
+        
+        # Wrap in KISS Data Frame (CMD 0x00)
+        # Wire: [FEND] [0x00] [APP_CMD] [CRC] [FEND]
+        frame = KISSProtocol.wrap_frame(full_payload, KISSProtocol.CMD_DATA)
+        
         self.ser.write(frame)
-        print(f"   [TX] Sent CMD: 0x{cmd_id:02X}")
+        print(f"   [TX] Sent CMD: 0x{cmd_id:02X} (CRC: {crc:08X})")
 
     def cli_loop(self):
         """Interactive Command Line Interface."""
@@ -150,50 +161,51 @@ class GroundStation:
         """Unescapes and handles KISS payload."""
         payload = KISSProtocol.unescape(escaped_data)
         
-        if len(payload) < 1: return 
+        # Min size: [CMD:1] [CRC:4] = 5 bytes
+        if len(payload) < 5: return 
         
+        # 1. Extract Components
         cmd_byte = payload[0]
+        data_content = payload[0:-4] # CMD + PAYLOAD (Excluding CRC)
+        received_crc_bytes = payload[-4:]
+        
+        # 2. Extract CRC
+        received_crc = struct.unpack('<I', received_crc_bytes)[0]
+        
+        # 3. Calculate CRC (Over CMD + PAYLOAD)
+        calc_crc = KISSProtocol.calculate_crc(data_content)
+        
+        if calc_crc != received_crc:
+            print(f"⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
+            return
+
+        # 4. Dispatch
+        payload_body = data_content[1:] # Exclude CMD
 
         # CMD 0x01: Log Message
         if cmd_byte == 0x01:
-             text = payload[1:].decode('utf-8', errors='replace')
+             text = payload_body.decode('utf-8', errors='replace')
              self.process_log_line(text)
              return
 
         # CMD 0x00: Image Data (Space Ready Format)
-        if cmd_byte != 0x00: return 
-
-        # Payload (excl cmd) is: [ChunkID + Data + CRC]
-        payload_no_cmd = payload[1:]
-        data_to_check = payload_no_cmd[:-4] # Exclude CRC-32 (last 4 bytes)
-        received_crc_bytes = payload_no_cmd[-4:]
-        
-        # Decode CRC-32 (Little Endian)
-        received_crc = struct.unpack('<I', received_crc_bytes)[0]
-        
-        # Calculate Local CRC
-        calc_crc = KISSProtocol.calculate_crc(data_to_check)
-        
-        if calc_crc != received_crc:
-            print(f"⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X}")
-            return
+        if cmd_byte == 0x00:
+            if len(payload_body) < 2: return # Need ChunkID
             
-        # Extract Data
-        # ChunkID (2 bytes)
-        chunk_id = data_to_check[0] | (data_to_check[1] << 8)
-        
-        # Deduplication Check
-        if chunk_id in self.received_chunk_ids:
-             # We already have this chunk. Ignore to prevent >100% size or corruption.
-             return
+            # ChunkID (2 bytes)
+            chunk_id = payload_body[0] | (payload_body[1] << 8)
+            img_chunk = payload_body[2:]
+            
+            # Deduplication Check
+            if chunk_id in self.received_chunk_ids:
+                 return # Duplicate
 
-        self.received_chunk_ids.add(chunk_id)
-        
-        img_chunk = data_to_check[2:]
-        
-        # Append
-        self.current_img_data.extend(img_chunk)
-        self.print_progress()
+            self.received_chunk_ids.add(chunk_id)
+            self.current_img_data.extend(img_chunk)
+            self.print_progress()
+            return
+
+        print(f"   Rx Unknown CMD: 0x{cmd_byte:02X}")
 
     def process_log_line(self, text):
         """Parses ASCII log lines."""
