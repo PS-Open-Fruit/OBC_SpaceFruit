@@ -502,10 +502,11 @@ void OBC_Process_Loop(void) {
              }
              // Handle Image Chunk (0x13)
              else if (cmd_id == 0x13) {
-                 // Format: [0x13] [ChunkID:2] [Data...]
+                 // Format: [0x13] [ChunkID:2] [Data...] [CRC:4]
                  uint16_t chunk_id;
                  memcpy(&chunk_id, &decoded[1], 2);
-                 uint16_t data_len = dec_len - 3;
+                 // We must strip the 4-byte CRC from the length, as dec_len includes it
+                 uint16_t data_len = (dec_len >= 7) ? (dec_len - 7) : 0;
                  uint8_t* raw_data = &decoded[3];
                  
                  if (chunk_id == next_chunk_to_req) {
