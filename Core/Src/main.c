@@ -251,7 +251,7 @@ int main(void)
   epsUartQueueHandle = osMessageQueueNew (16, sizeof(uint8_t), &epsUartQueue_attributes);
 
   /* creation of printQueue */
-  printQueueHandle = osMessageQueueNew (16, sizeof(uint8_t), &printQueue_attributes);
+  printQueueHandle = osMessageQueueNew (512, sizeof(uint8_t), &printQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -626,7 +626,7 @@ static void MX_UART5_Init(void)
 
   /* USER CODE END UART5_Init 1 */
   huart5.Instance = UART5;
-  huart5.Init.BaudRate = 256000;
+  huart5.Init.BaudRate = 115200;
   huart5.Init.WordLength = UART_WORDLENGTH_8B;
   huart5.Init.StopBits = UART_STOPBITS_1;
   huart5.Init.Parity = UART_PARITY_NONE;
@@ -889,7 +889,7 @@ void mainTask(void *argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
-  printf("Start of mainTask\r\n");
+  printf("\ecStart of mainTask\r\n");
   gpio_t cs_flash = {
       .GPIOx = NOR_CS_GPIO_Port,
       .Pin = NOR_CS_Pin};
@@ -919,12 +919,12 @@ void mainTask(void *argument)
   tmp1075_init(&temp_sen);
   rv3028c7_init(&rtc);
   printf("Program Start\r\n");
-
+  
   fs_init(&flash);
   lfs_file_t file;
   // mount the filesystem
   int err = lfs_mount(&lfs, &cfg);
-
+  
   // reformat if we can't mount the filesystem
   // this should only happen on the first boot
   if (err)
@@ -933,29 +933,34 @@ void mainTask(void *argument)
     lfs_format(&lfs, &cfg);
     lfs_mount(&lfs, &cfg);
   }
+  printf("After err\r\n");
 
   // read current count
   uint32_t boot_count = 0;
   lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
+  printf("After lfs_file_open\r\n");
   lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
-  
+  printf("After lfs_file_read\r\n");
   // update boot count
   boot_count += 1;
   lfs_file_rewind(&lfs, &file);
+  printf("After lfs_file_rewind\r\n");
   lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
+  printf("After lfs_file_write\r\n");
 
   // remember the storage is not updated until the file is closed successfully
   lfs_file_close(&lfs, &file);
+  printf("After lfs_file_close\r\n");
 
   // release any resources we were using
   lfs_unmount(&lfs);
-
-
-  // print the boot count
+  printf("After lfs_unmount\r\n");
   printf("boot_count: %ld\n", boot_count);
+  osDelay(500);
+  // print the boot count
 
   /* Infinite loop */
-  for (;;)
+  for(;;)
   {
     int32_t temp = 0;
     hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
@@ -995,7 +1000,7 @@ void mainTask(void *argument)
     printf("\r\n");
     osDelay(1000);
   }
-  printf("It exits main task\r\n");
+  // printf("It exits main task\r\n");
   /* USER CODE END 5 */
 }
 
@@ -1011,7 +1016,9 @@ void usbTask(void *argument)
   /* USER CODE BEGIN usbTask */
   usb_data_t usb_data_rx = {
       .is_new_message = 0,
-      .len = 0}; // Local buffer to hold received queue item
+      .len = 0
+  }; // Local buffer to hold received queue item
+  osDelay(100);
   for (;;)
   {
     // Block here until data arrives. No CPU usage while waiting.
@@ -1050,9 +1057,10 @@ void wdtFeedTask(void *argument)
   {
     if (HAL_IWDG_Refresh(&hiwdg) != HAL_OK)
     {
-      printf("IWDT Error");
+      printf("IWDT Error\r\n");
     }
-    osDelay(400);
+    printf("IWDG Still triggering\r\n");
+    osDelay(200);
   }
   /* USER CODE END wdtFeedTask */
 }
@@ -1093,9 +1101,8 @@ void sensorQueryTask(void *argument)
     osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
     // 1. Send Query
     uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
-    HAL_UART_Transmit_DMA(&EPS_UART, queryData, 4);
+    HAL_UART_Transmit(&EPS_UART, queryData, 4,500);
     HAL_StatusTypeDef ret = HAL_UARTEx_ReceiveToIdle(&EPS_UART,frameRx,rxLen,&actualRxLen,500);
-
     if (ret == HAL_OK){
       // printf("Return Length %u\r\n",actualRxLen);
       uint16_t msgLen = 0;
@@ -1204,7 +1211,6 @@ void logTask(void *argument)
   {
     osMessageQueueGet(printQueueHandle,&ch,NULL,osWaitForever);
     HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
-
     // osDelay(1);
   }
   /* USER CODE END logTask */
