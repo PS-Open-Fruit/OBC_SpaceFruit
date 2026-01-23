@@ -44,7 +44,7 @@ usb_data_t usb_buff = {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define EPS_RECV_LEN 128 // Increased size for safety
+#define EPS_RECV_LEN 64 // Increased size for safety
   #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PD */
 
@@ -99,8 +99,15 @@ const osThreadAttr_t wdtFeed_attributes = {
 osThreadId_t sensorQueryHandle;
 const osThreadAttr_t sensorQuery_attributes = {
   .name = "sensorQuery",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for printTask */
+osThreadId_t printTaskHandle;
+const osThreadAttr_t printTask_attributes = {
+  .name = "printTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
@@ -117,6 +124,11 @@ const osMessageQueueAttr_t cdcDataQueue_attributes = {
 osMessageQueueId_t epsUartQueueHandle;
 const osMessageQueueAttr_t epsUartQueue_attributes = {
   .name = "epsUartQueue"
+};
+/* Definitions for printQueue */
+osMessageQueueId_t printQueueHandle;
+const osMessageQueueAttr_t printQueue_attributes = {
+  .name = "printQueue"
 };
 /* Definitions for epsFlag */
 osEventFlagsId_t epsFlagHandle;
@@ -156,6 +168,7 @@ void mainTask(void *argument);
 void usbTask(void *argument);
 void wdtFeedTask(void *argument);
 void sensorQueryTask(void *argument);
+void logTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -237,6 +250,9 @@ int main(void)
   /* creation of epsUartQueue */
   epsUartQueueHandle = osMessageQueueNew (16, sizeof(uint8_t), &epsUartQueue_attributes);
 
+  /* creation of printQueue */
+  printQueueHandle = osMessageQueueNew (16, sizeof(uint8_t), &printQueue_attributes);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -253,6 +269,9 @@ int main(void)
 
   /* creation of sensorQuery */
   sensorQueryHandle = osThreadNew(sensorQueryTask, NULL, &sensorQuery_attributes);
+
+  /* creation of printTask */
+  printTaskHandle = osThreadNew(logTask, NULL, &printTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -835,7 +854,8 @@ PUTCHAR_PROTOTYPE
 {
   /* Place your implementation of fputc here */
   /* e.g. write a character to the USART1 and Loop until the end of transmission */
-  HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
+  // HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
+  osMessageQueuePut(printQueueHandle,&ch,1,0xFFFF);
 
   return ch;
 }
@@ -958,13 +978,18 @@ void mainTask(void *argument)
     {
       printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
     }
-        // 1. Send Query
-    uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
-    HAL_UART_Transmit_DMA(&EPS_UART, queryData, 4);
+    
+    printf("Polling EPS through Flag...\r\n");
     osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
-    uint32_t flagStatus = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS,osFlagsWaitAny,500);
-    if (flagStatus == EVENT_FLAG_ERROR){
-      printf("Wait Flag Error\r\n");
+    uint32_t flag_ret = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS | EPS_FLAG_POLL_ERROR, osFlagsWaitAny,500);
+    if (flag_ret & EPS_FLAG_POLL_SUCCESS){
+      printf("Main Thread : Poll Success\r\n");
+    }
+    else if (flag_ret & EPS_FLAG_POLL_ERROR){
+      printf("Main Thread : Poll Error\r\n");
+    }
+    else if (flag_ret & EVENT_FLAG_ERROR){
+      printf("Main Thread : No Response or Flag Error\r\n");
     }
 
     printf("\r\n");
@@ -1042,70 +1067,147 @@ void wdtFeedTask(void *argument)
 void sensorQueryTask(void *argument)
 {
   /* USER CODE BEGIN sensorQueryTask */
-  /* Infinite loop */
-
-  /* Defines */
-
-  // --- RE-ASSEMBLY BUFFER (The "State Machine") ---
-  uint8_t frame_buf[EPS_RECV_LEN];
-  uint8_t frame_index = 0;
-  uint8_t eps_recv_buf = 0;
-  uint8_t eps_recv_ready = 0;
-
   typedef enum{
     NO_MSG,
     FOUND_FRAME,
+    FRAME_CPLT,
   } rx_state;
   rx_state state = NO_MSG;
+  
+  // Blocking Mode Experiment
+  uint8_t frameRx[EPS_RECV_LEN];
+  uint8_t decodedRx[EPS_RECV_LEN];
+  uint16_t rxLen = 32;
+  uint16_t actualRxLen = 0;
 
-  printf("Sensor Query Starts\r\n");
+  typedef struct eps_solar {
+    int16_t voltage;
+    int16_t current;
+    int8_t channel;
+  } eps_solar_t;
+
+  eps_solar_t solar1;
+
   for (;;)
   {
+    osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
+    // 1. Send Query
+    uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
+    HAL_UART_Transmit_DMA(&EPS_UART, queryData, 4);
+    HAL_StatusTypeDef ret = HAL_UARTEx_ReceiveToIdle(&EPS_UART,frameRx,rxLen,&actualRxLen,500);
 
-    osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsNoClear,osWaitForever);
-    HAL_UART_Receive_DMA(&EPS_UART, &eps_recv_buf, 1);
+    if (ret == HAL_OK){
+      // printf("Return Length %u\r\n",actualRxLen);
+      uint16_t msgLen = 0;
+      for (int i = 0; i < actualRxLen; i++){
+        msgLen++;
+        if (frameRx[i] == FEND){
+          if (state == NO_MSG){
+            state = FOUND_FRAME;
+          }
+          else if (state == FOUND_FRAME){
+            state = FRAME_CPLT;
+            break;
+          }
+        }
+      }
+      if (state == FRAME_CPLT){
+        state = NO_MSG;
+        uint16_t decoded_len = KISS_SLIP_DECODE(frameRx,msgLen,decodedRx);
+        printf("Decoded Length %u\r\n",decoded_len);
+        solar1.voltage = (decodedRx[1] << 8) | decodedRx[0]; 
+        solar1.current = (decodedRx[3] << 8) | decodedRx[2]; 
+        solar1.channel = decodedRx[4]; 
+        printf("Voltage %dmV, Current %dmA, Channel %d\r\n",solar1.voltage,solar1.current,solar1.channel);
+        actualRxLen = 0;
+        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_SUCCESS);
+
+      }
+      else{
+        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+      }
+      
+    }
+    else {
+      osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+    }
+
+    // osDelay(1000);
+
+    // osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
+    // uint32_t flagStatus = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS,osFlagsWaitAny,500);
+    // if (flagStatus == EVENT_FLAG_ERROR){
+    //   printf("Wait Flag Error\r\n");
+    // }
+
+    // osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsNoClear,osWaitForever);
+    // HAL_UART_Receive_DMA(&EPS_UART, &eps_recv_buf, 1);
+
+
 
     // 2. Wait for response (Wait 1000ms max, or however long your device takes to reply)
-    osStatus_t os_ret = osMessageQueueGet(epsUartQueueHandle, &eps_recv_ready, NULL, 1000);
+    // osStatus_t os_ret = osMessageQueueGet(epsUartQueueHandle, &eps_recv_ready, NULL, 1000);
 
-    if (os_ret == osOK){
-      frame_buf[frame_index++] = eps_recv_buf;
-      if (eps_recv_buf == FEND){
-        if (state == NO_MSG){
-          state = FOUND_FRAME;
-        }
-        else if (state == FOUND_FRAME){
-          osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
-          osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_SUCCESS);
-          state = NO_MSG;
-          // for (int i = 0; i < frame_index;i++){
-          //   printf("0x%02X ",frame_buf[i]);
-          // }
-          // printf("\r\n");
-          frame_index = 0;
-        }
-      }
-    }
+    // if (os_ret == osOK){
+    //   frame_buf[frame_index++] = eps_recv_buf;
+    //   if (eps_recv_buf == FEND){
+    //     if (state == NO_MSG){
+    //       state = FOUND_FRAME;
+    //     }
+    //     else if (state == FOUND_FRAME){
+    //       osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
+    //       osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_SUCCESS);
+    //       state = NO_MSG;
+    //       // for (int i = 0; i < frame_index;i++){
+    //       //   printf("0x%02X ",frame_buf[i]);
+    //       // }
+    //       // printf("\r\n");
+    //       frame_index = 0;
+    //     }
+    //   }
+    // }
 
-    if (os_ret == osErrorTimeout){
-      // printf("EPS Timeout - ");
-      if (state == NO_MSG){
-        osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
-        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
-        // printf("No Response");
-      }
-      else if (state == FOUND_FRAME){
-        osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
-        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
-        // printf("Message Break");
-      }
-      // printf("\r\n");
-    }
+    // if (os_ret == osErrorTimeout){
+    //   // printf("EPS Timeout - ");
+    //   if (state == NO_MSG){
+    //     osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
+    //     osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+    //     // printf("No Response");
+    //   }
+    //   else if (state == FOUND_FRAME){
+    //     osEventFlagsClear(epsFlagHandle,EPS_FLAG_POLL_START | EPS_FLAG_POLL_ERROR);
+    //     osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+    //     // printf("Message Break");
+    //   }
+    //   // printf("\r\n");
+    // }
 
     // Optional: Delay before next query
     // osDelay(500);
   }
   /* USER CODE END sensorQueryTask */
+}
+
+/* USER CODE BEGIN Header_logTask */
+/**
+* @brief Function implementing the printTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_logTask */
+void logTask(void *argument)
+{
+  /* USER CODE BEGIN logTask */
+  uint8_t ch = 0;
+  /* Infinite loop */
+  for(;;)
+  {
+    osMessageQueueGet(printQueueHandle,&ch,NULL,osWaitForever);
+    HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
+
+    // osDelay(1);
+  }
+  /* USER CODE END logTask */
 }
 
 /**
