@@ -98,18 +98,9 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
 
         case VR_CMD_CHUNK_RES: {
             // [0x13] [ChunkID:2] [Data... (N)] [CRC:4]
-            // Note: input `decoded` already stripped KISS wrapper.
-            // But included CRC.
             
             uint16_t chunk_id;
             memcpy(&chunk_id, &decoded[1], 2);
-            
-            // data_len = (TotalPayload - CMD(1) - ChunkID(2) - CRC(4)) ?? 
-            // Wait. `dec_len` is Total Payload including CRC?
-            // Yes. `dec_len - 4` is valid payload len.
-            // Payload is `[CMD:1] [ChunkID:2] [DATA...] [CRC:4]`? 
-            // Previous code: `uint16_t data_len = (dec_len >= 7) ? (dec_len - 7) : 0;` (7 = 1+2+4).
-            // `uint8_t* raw_data = &decoded[3];`
             
             uint16_t data_len = (dec_len >= 7) ? (dec_len - 7) : 0;
             uint8_t* raw_data = &decoded[3];
