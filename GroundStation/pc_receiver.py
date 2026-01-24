@@ -176,7 +176,7 @@ class GroundStation:
         calc_crc = KISSProtocol.calculate_crc(data_content)
         
         if calc_crc != received_crc:
-            print(f"⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
+            print(f"\n⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
             return
 
         # 4. Dispatch
