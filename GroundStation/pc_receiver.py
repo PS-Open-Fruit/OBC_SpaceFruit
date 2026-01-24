@@ -188,6 +188,23 @@ class GroundStation:
              self.process_log_line(text)
              return
 
+        # CMD 0x12: Capture Response (Start Download)
+        if cmd_byte == 0x12:
+            # Payload: [ImgID:2] [Size:4]
+            if len(payload_body) < 6: return
+            img_id = struct.unpack('<H', payload_body[0:2])[0]
+            self.expected_size = struct.unpack('<I', payload_body[2:6])[0]
+            
+            sys.stdout.write("\r")
+            
+            print(f"   [RX] START IMG #{img_id}, Size: {self.expected_size/1024:.2f} KB")
+            
+            self.downloading = True
+            self.current_img_data = bytearray()
+            self.received_chunk_ids = set()
+            self.start_time = time.time()
+            return
+
         # CMD 0x00: Image Data (Space Ready Format)
         if cmd_byte == 0x00:
             if len(payload_body) < 2: return # Need ChunkID
@@ -211,22 +228,8 @@ class GroundStation:
         """Parses ASCII log lines."""
         if not text: return
         
-        # 1. Detect Start of Download
-        if "[OBC] Image Captured! Size:" in text:
-            try:
-                parts = text.split("Size: ")[1].split(" ")
-                self.expected_size = int(parts[0])
-                print(f"   INCOMING IMAGE: {self.expected_size/1024:.2f} KB")
-                
-                self.downloading = True
-                self.current_img_data = bytearray()
-                self.received_chunk_ids = set() # Reset tracker
-                self.start_time = time.time()
-            except:
-                print(f"⚠️ Header Parse Error: {text}")
-
-        # 2. Detect End of Download
-        elif "[OBC] Download Complete!" in text:
+        # 1. Detect End of Download
+        if "Download Complete!" in text:
             filename = os.path.join(DOWNLOAD_DIR, f"img_{int(time.time())}.jpg")
             with open(filename, "wb") as f:
                 f.write(self.current_img_data)
@@ -249,7 +252,7 @@ class GroundStation:
                 prefix = "   " 
                 
                 # Avoid double prefix if OBC already sent it
-                if text.startswith("[OBC]"):
+                if text.startswith("[OBC]") or text.startswith("[VR]"):
                     print(f"{prefix}{text}")
                 else:
                     print(f"{prefix}[OBC] {text}")
