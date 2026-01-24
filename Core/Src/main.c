@@ -106,8 +106,8 @@ const osThreadAttr_t sensorQuery_attributes = {
 osThreadId_t printTaskHandle;
 const osThreadAttr_t printTask_attributes = {
   .name = "printTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
 };
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
@@ -221,7 +221,6 @@ int main(void)
   MX_CRC_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
-  printf("int main();\r\n");
   // HAL_CAN_Start(&hcan2);
 
   // rv3028c7_set_hour(&rtc,8);
@@ -251,7 +250,7 @@ int main(void)
   epsUartQueueHandle = osMessageQueueNew (16, sizeof(uint8_t), &epsUartQueue_attributes);
 
   /* creation of printQueue */
-  printQueueHandle = osMessageQueueNew (512, sizeof(uint8_t), &printQueue_attributes);
+  printQueueHandle = osMessageQueueNew (256, sizeof(uint8_t), &printQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -947,7 +946,7 @@ void mainTask(void *argument)
   printf("After lfs_file_rewind\r\n");
   lfs_file_write(&lfs, &file, &boot_count, sizeof(boot_count));
   printf("After lfs_file_write\r\n");
-
+  osDelay(100);
   // remember the storage is not updated until the file is closed successfully
   lfs_file_close(&lfs, &file);
   printf("After lfs_file_close\r\n");
@@ -962,42 +961,42 @@ void mainTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    int32_t temp = 0;
-    hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
-    if (ret != hal_ok)
-    {
-      printf("Read Temperature Error");
-    }
-    else
-    {
-      printf("Temperature : %ld\r\n", temp);
-    }
+    // int32_t temp = 0;
+    // hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
+    // if (ret != hal_ok)
+    // {
+    //   printf("Read Temperature Error");
+    // }
+    // else
+    // {
+    //   printf("Temperature : %ld\r\n", temp);
+    // }
 
-    date_time_t datetime;
-    ret = rv3028c7_read_time(&rtc, &datetime);
-    if (ret != hal_ok)
-    {
-      printf("Read RTC Error");
-    }
-    else
-    {
-      printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
-    }
+    // date_time_t datetime;
+    // ret = rv3028c7_read_time(&rtc, &datetime);
+    // if (ret != hal_ok)
+    // {
+    //   printf("Read RTC Error");
+    // }
+    // else
+    // {
+    //   printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
+    // }
     
-    printf("Polling EPS through Flag...\r\n");
-    osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
-    uint32_t flag_ret = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS | EPS_FLAG_POLL_ERROR, osFlagsWaitAny,500);
-    if (flag_ret & EPS_FLAG_POLL_SUCCESS){
-      printf("Main Thread : Poll Success\r\n");
-    }
-    else if (flag_ret & EPS_FLAG_POLL_ERROR){
-      printf("Main Thread : Poll Error\r\n");
-    }
-    else if (flag_ret & EVENT_FLAG_ERROR){
-      printf("Main Thread : No Response or Flag Error\r\n");
-    }
+    // printf("Polling EPS through Flag...\r\n");
+    // osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
+    // uint32_t flag_ret = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS | EPS_FLAG_POLL_ERROR, osFlagsWaitAny,500);
+    // if (flag_ret & EPS_FLAG_POLL_SUCCESS){
+    //   printf("Main Thread : Poll Success\r\n");
+    // }
+    // else if (flag_ret & EPS_FLAG_POLL_ERROR){
+    //   printf("Main Thread : Poll Error\r\n");
+    // }
+    // else if (flag_ret & EVENT_FLAG_ERROR){
+    //   printf("Main Thread : No Response or Flag Error\r\n");
+    // }
 
-    printf("\r\n");
+    // printf("\r\n");
     osDelay(1000);
   }
   // printf("It exits main task\r\n");
