@@ -98,3 +98,10 @@ build/
 # to share hardware configuration
 # If you don't want to track it, uncomment the line below
 # *.ioc
+
+*.jpg
+*.png
+
+# Python cache files
+**/__pycache__/
+*.pyc
