@@ -26,6 +26,8 @@
 #include "usbd_cdc_if.h"
 #include <string.h>
 #include <stdarg.h>
+#include "../../OBC_Software/Common/obc_packet.h"
+#include "../../OBC_Software/Subsystems/VR/subsystem_vr.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,11 +38,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#define FEND  0xC0
-#define FESC  0xDB
-#define TFEND 0xDC
-#define TFESC 0xDD
-#define MAX_FRAME_SIZE 512 // Increased for Image Chunks
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -82,8 +79,6 @@ static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
-uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer);
-uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload);
 void OBC_Process_Loop(void);
 void OBC_On_Receive(uint8_t* Buf, uint32_t *Len);
 void OBC_Log(const char *fmt, ...);
@@ -127,6 +122,8 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_CRC_Init();
   /* USER CODE BEGIN 2 */
+  OBC_Packet_Init(&hcrc);
+  VR_Init();
   OBC_Log("[OBC] System Booted. VCP Active.");
   HAL_UART_Receive_IT(&hlpuart1, &uart_rx_char, 1);
   /* USER CODE END 2 */
@@ -356,225 +353,32 @@ void OBC_Log(const char *fmt, ...) {
     memcpy(&payload[1], buf, msg_len);
     
     // Calculate CRC (CMD + Content)
-    uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)payload, msg_len + 1);
-    crc ^= 0xFFFFFFFF; // Inverse for Standard CRC32
+    uint32_t crc = OBC_Calculate_CRC(payload, msg_len + 1);
     
     uint16_t p_idx = msg_len + 1;
-    payload[p_idx++] = crc & 0xFF;
-    payload[p_idx++] = (crc >> 8) & 0xFF;
-    payload[p_idx++] = (crc >> 16) & 0xFF;
-    payload[p_idx++] = (crc >> 24) & 0xFF;
+    memcpy(&payload[p_idx], &crc, 4);
+    p_idx += 4;
 
     uint8_t tx_frame[600];
     uint16_t enc_len = SLIP_Encode(payload, p_idx, tx_frame);
     HAL_UART_Transmit(&hlpuart1, tx_frame, enc_len, 1000);
 }
 
-// --- SLIP Encoder ---
-// Does NOT insert Command Byte (e.g. 0x00). Can be used for any KISS Frame Type.
-uint16_t SLIP_Encode(uint8_t* payload, uint16_t len, uint8_t* out_buffer) {
-    uint16_t idx = 0;
-    out_buffer[idx++] = FEND;
-    
-    for (uint16_t i = 0; i < len; i++) {
-        uint8_t c = payload[i];
-        if (c == FEND) {
-            out_buffer[idx++] = FESC;
-            out_buffer[idx++] = TFEND;
-        } else if (c == FESC) {
-            out_buffer[idx++] = FESC;
-            out_buffer[idx++] = TFESC;
-        } else {
-            out_buffer[idx++] = c;
-        }
-    }
-    out_buffer[idx++] = FEND;
-    return idx;
-}
 
-// --- SLIP Decoder ---
-uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
-    if (len < 3) {
-        OBC_Log("[OBC] SLIP Error: Frame too short (%d)", len);
-        return 0;
-    }
-    if (frame[0] != FEND || frame[len-1] != FEND) {
-        OBC_Log("[OBC] SLIP Error: Missing FEND markers");
-        return 0;
-    }
-    if (frame[1] != 0x00) {
-        OBC_Log("[OBC] SLIP Error: Invalid Header 0x%02X (Expected 0x00)", frame[1]);
-        return 0; 
-    }
-    
-    uint16_t out_idx = 0;
-    for (uint16_t i = 2; i < len - 1; i++) {
-        uint8_t c = frame[i];
-        if (c == FESC) {
-            i++;
-            if (i >= len - 1) return 0; // Error
-            if (frame[i] == TFEND) out_payload[out_idx++] = FEND;
-            else if (frame[i] == TFESC) out_payload[out_idx++] = FESC;
-        } else {
-            out_payload[out_idx++] = c;
-        }
-    }
-    return out_idx;
-}
 
 // --- Main Process Loop (Runs in while(1)) ---
 void OBC_Process_Loop(void) {
     static uint32_t last_tick = 0;
-    static uint16_t next_chunk_to_req = 0;
-    static uint8_t download_active = 0;
     
     // 1. Process Received Packets (VR Simulator - Buffer B)
     if (is_frame_ready) {
-        uint8_t decoded[512]; // Increased buffer size
+        uint8_t decoded[512]; 
         uint16_t dec_len = SLIP_Decode(app_process_buffer, app_process_len, decoded);
         
-        // Validate CRC (Min Size: 1 CMD + 4 CRC = 5)
-        uint8_t crc_ok = 0;
-        if (dec_len >= 5) {
-             uint32_t rx_crc;
-             memcpy(&rx_crc, &decoded[dec_len-4], 4);
-             
-             uint32_t calc_crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)decoded, dec_len-4);
-             calc_crc ^= 0xFFFFFFFF;
-             
-             if (calc_crc == rx_crc) crc_ok = 1;
-             else OBC_Log("[OBC] VR CRC Fail: Rx %08X vs Calc %08X", rx_crc, calc_crc);
-        } else if (dec_len > 0) {
-             OBC_Log("[OBC] VR Error: Payload too short (%d)", dec_len);
-        }
+        // Pass to VR Subsystem
+        VR_Handle_Packet(decoded, dec_len);
 
-        if (crc_ok) {
-             uint8_t cmd_id = decoded[0];
-             
-             // Check for PONG (0x10) - Framed Response
-             if (cmd_id == 0x10) {
-                 OBC_Log("[OBC] >> PONG Received! Link Active.");
-                 HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-             }
-             // Handle Image Capture Response (0x12)
-             else if (cmd_id == 0x12) {
-                 // Format: [0x12] [ImgID:2] [Size:4]
-                 uint32_t img_size;
-                 memcpy(&img_size, &decoded[3], 4);
-                 OBC_Log("[OBC] Image Captured! Size: %lu bytes. Starting Download...", img_size);
-                 
-                 // Start Downloading
-                 download_active = 1;
-                 next_chunk_to_req = 0;
-
-                 // Kickstart download immediately
-                 // REQ: [0x00] [0x13] [0x00] [0x00] (Chunk 0) + CRC
-                 uint8_t req[8] = {0x00, 0x13, 0x00, 0x00, 0, 0, 0, 0};
-                 uint32_t crc_req = HAL_CRC_Calculate(&hcrc, (uint32_t*)req, 4);
-                 crc_req ^= 0xFFFFFFFF;
-                 memcpy(&req[4], &crc_req, 4);
-
-                 uint8_t tx_frame[32];
-                 uint16_t len = SLIP_Encode(req, 8, tx_frame);
-                 CDC_Transmit_FS(tx_frame, len);
-             }
-             // Handle Status Response (0x11)
-             else if (cmd_id == 0x11) {
-                 // Payload: [0x11] [CPU:1] [Temp:4] [RAM:2] [Disk:4]
-                 if (dec_len >= 12) {
-                     uint8_t cpu = decoded[1];
-                     float temp;
-                     uint16_t ram;
-                     uint32_t disk;
-                     
-                     memcpy(&temp, &decoded[2], 4);
-                     memcpy(&ram, &decoded[6], 2);
-                     memcpy(&disk, &decoded[8], 4);
-                     
-                     // Manual Float-to-Int conversion to avoid %f linker issues
-                     int t_int = (int)temp;
-                     int t_dec = (int)((temp - t_int) * 10);
-                     if (t_dec < 0) t_dec = -t_dec; // Handle negative decimals
-                     
-                     // Print Formatted String (This goes to LPUART1 -> PC)
-                     OBC_Log("[OBC] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB | Disk: %lu MB", cpu, t_int, t_dec, ram, disk);
-                 }
-             }
-             // Handle Image Chunk (0x13)
-             else if (cmd_id == 0x13) {
-                 // Format: [0x13] [ChunkID:2] [Data...] [CRC:4]
-                 uint16_t chunk_id;
-                 memcpy(&chunk_id, &decoded[1], 2);
-                 // We must strip the 4-byte CRC from the length, as dec_len includes it
-                 uint16_t data_len = (dec_len >= 7) ? (dec_len - 7) : 0;
-                 uint8_t* raw_data = &decoded[3];
-                 
-                 if (chunk_id == next_chunk_to_req) {
-                     // Toggle LED for Visual Feedback
-                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-
-                     // SEND COMPLIANT KISS PROTOCOL FRAME (OBC -> GS)
-                     // Packet Format: [FEND] [0x00] [Escaped Payload] [FEND]
-                     // Payload Format: [ChunkID:2] [Data:N] [CRC:2]
-                     
-                     // 1. Construct Raw Payload (CMD 0x00 + ChunkID + Data)
-                     // Since SLIP_Encode no longer adds header, we must add 0x00 explicitly.
-                     uint8_t payload_buffer[600];
-                     payload_buffer[0] = 0x00; // KISS Data Command
-                     payload_buffer[1] = chunk_id & 0xFF;
-                     payload_buffer[2] = (chunk_id >> 8) & 0xFF;
-                     memcpy(&payload_buffer[3], raw_data, data_len);
-                     
-                     uint16_t current_payload_len = 3 + data_len;
-
-                     // 2. Append CRC-32 (Hardware - STM32L4)
-                     // Checksum over CMD + ChunkID + Data
-                     uint32_t crc_hw = HAL_CRC_Calculate(&hcrc, (uint32_t*)payload_buffer, current_payload_len);
-                     crc_hw ^= 0xFFFFFFFF; 
-
-                     payload_buffer[current_payload_len++] = crc_hw & 0xFF;
-                     payload_buffer[current_payload_len++] = (crc_hw >> 8) & 0xFF;
-                     payload_buffer[current_payload_len++] = (crc_hw >> 16) & 0xFF;
-                     payload_buffer[current_payload_len++] = (crc_hw >> 24) & 0xFF;
-
-                     // 3. Encode (Escapes + FENDs)
-                     // Packet Format: [FEND] [0x00] [Escaped Payload] [FEND]
-                     // Payload Format: [ChunkID:2] [Data:N] [CRC:4]
-                     uint8_t kiss_tx_buffer[1200];
-                     uint16_t kiss_len = SLIP_Encode(payload_buffer, current_payload_len, kiss_tx_buffer);
-                     
-                     HAL_UART_Transmit(&hlpuart1, kiss_tx_buffer, kiss_len, 2000);
-                     
-                     // Advance Counter
-                     next_chunk_to_req++;
-
-                     // Stop condition (Empty chunk or small chunk means EOF)
-                     if (data_len < 200) { 
-                         OBC_Log("[OBC] Download Complete!");
-                         download_active = 0;
-                     } else {
-                         // REQ NEXT CHUNK (CRC Included)
-                         uint8_t req[8];
-                         req[0] = 0x00; // KISS Data
-                         req[1] = 0x13;
-                         req[2] = next_chunk_to_req & 0xFF;
-                         req[3] = (next_chunk_to_req >> 8) & 0xFF;
-                         
-                         uint32_t crc_next = HAL_CRC_Calculate(&hcrc, (uint32_t*)req, 4);
-                         crc_next ^= 0xFFFFFFFF;
-                         memcpy(&req[4], &crc_next, 4);
-
-                         uint8_t tx_frame[32];
-                         uint16_t len = SLIP_Encode(req, 8, tx_frame);
-                         CDC_Transmit_FS(tx_frame, len);
-                     }
-                 }
-             }
-             else {
-                 OBC_Log("[OBC] Rx Unknown Frame: %d bytes. Cmd: %02X", dec_len, cmd_id);
-             }
-        }
-        // Mark Buffer B as empty, allowing ISR to fill it again
+        // Mark Buffer B as empty
         is_frame_ready = 0; 
     }
 
@@ -589,8 +393,7 @@ void OBC_Process_Loop(void) {
              uint32_t rx_crc;
              memcpy(&rx_crc, &decoded_gs[dec_len-4], 4);
              
-             uint32_t calc_crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)decoded_gs, dec_len-4);
-             calc_crc ^= 0xFFFFFFFF;
+             uint32_t calc_crc = OBC_Calculate_CRC(decoded_gs, dec_len-4);
              
              if (calc_crc == rx_crc) gs_crc_ok = 1;
              else OBC_Log("[OBC] GS CRC Fail: Rx %08X vs Calc %08X", rx_crc, calc_crc);
@@ -601,41 +404,17 @@ void OBC_Process_Loop(void) {
         if (gs_crc_ok) {
              uint8_t cmd_id = decoded_gs[0];
              
-             // Forward to VR (Wait! VR expects CRC too now!)
-             // We need to re-encode with CRC for VR Link
-             
-             if (cmd_id == 0x12) { // Capture
-                 uint8_t cmd[6] = {0x00, 0x12, 0, 0, 0, 0}; // CMD + ID + CRC
-                 uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)cmd, 2);
-                 crc ^= 0xFFFFFFFF;
-                 memcpy(&cmd[2], &crc, 4);
-                 
-                 uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 6, tx);
-                 CDC_Transmit_FS(tx, len);
+             if (cmd_id == 0x12) { 
                  OBC_Log("[OBC] GS CMD: Capture!");
+                 VR_SendCmd(VR_CMD_CAPTURE_RES);
              }
-             else if (cmd_id == 0x10) { // Ping
-                 uint8_t cmd[6] = {0x00, 0x10, 0, 0, 0, 0};
-                 uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)cmd, 2);
-                 crc ^= 0xFFFFFFFF;
-                 memcpy(&cmd[2], &crc, 4);
-
-                 uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 6, tx);
-                 CDC_Transmit_FS(tx, len);
+             else if (cmd_id == 0x10) { 
                  OBC_Log("[OBC] GS CMD: Ping!");
+                 VR_SendCmd(VR_CMD_PING);
              }
-             else if (cmd_id == 0x20) { // Status Request
-                 uint8_t cmd[6] = {0x00, 0x11, 0, 0, 0, 0}; // Map to VR Status Cmd
-                 uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)cmd, 2);
-                 crc ^= 0xFFFFFFFF;
-                 memcpy(&cmd[2], &crc, 4);
-
-                 uint8_t tx[32];
-                 uint16_t len = SLIP_Encode(cmd, 6, tx);
-                 CDC_Transmit_FS(tx, len);
+             else if (cmd_id == 0x20) { 
                  OBC_Log("[OBC] GS CMD: Status Req!");
+                 VR_SendCmd(VR_CMD_STATUS_RES); 
              }
         }
         is_gs_frame_ready = 0;
@@ -647,6 +426,8 @@ void OBC_Process_Loop(void) {
         
         // Heartbeat LED (Red)
         HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+        
+        VR_Update();
     }
 }
 
