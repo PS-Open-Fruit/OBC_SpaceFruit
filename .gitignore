@@ -101,3 +101,7 @@ build/
 
 *.jpg
 *.png
+
+# Python cache files
+**/__pycache__/
+*.pyc
