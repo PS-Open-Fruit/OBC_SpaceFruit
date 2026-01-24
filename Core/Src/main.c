@@ -29,6 +29,8 @@
 #include "tmp1075.h"
 #include "littlefs_port.h"
 #include "kiss_utils.h"
+#include "obc_helper.h"
+#include "eps_helper.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,12 +42,16 @@ usb_data_t usb_buff = {
     .len = 0,
 };
 
+obc_sensor_data_t obc_sensors;
+eps_sensor_data_t eps_data;
+
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define EPS_RECV_LEN 64 // Increased size for safety
-  #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -1073,12 +1079,14 @@ void sensorQueryTask(void *argument)
   for (;;)
   {
     osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
+    
+    HAL_StatusTypeDef ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,rxLen);
+    
     // 1. Send Query
     uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
-    HAL_StatusTypeDef ret = HAL_UART_Transmit_IT(&EPS_UART, queryData, 4);
+    ret = HAL_UART_Transmit_IT(&EPS_UART, queryData, 4);
 
 
-    ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,rxLen);
     osStatus_t queueStatus = osMessageQueueGet(epsUartQueueHandle,&actualRxLen,NULL,500);
     if (queueStatus == osOK && ret == HAL_OK){
       uint16_t msgLen = 0;

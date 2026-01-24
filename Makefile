@@ -79,6 +79,7 @@ obc-drivers/src/rv3028c7.c \
 obc-drivers/src/tmp1075.c \
 obc-drivers/src/littlefs_port.c \
 obc-drivers/src/kiss_utils.c \
+obc-drivers/src/eps_helper.c \
 littlefs/lfs.c \
 littlefs/lfs_util.c \
 Core/Src/freertos.c \
