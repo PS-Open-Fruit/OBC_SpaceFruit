@@ -42,8 +42,8 @@ usb_data_t usb_buff = {
     .len = 0,
 };
 
-obc_sensor_data_t obc_sensors;
-eps_sensor_data_t eps_data;
+obc_sensor_data_t obc_sensors_data;
+eps_sensor_data_t eps_sensors_data;
 
 
 /* USER CODE END PTD */
@@ -132,6 +132,11 @@ const osMessageQueueAttr_t epsUartQueue_attributes = {
 osMessageQueueId_t printQueueHandle;
 const osMessageQueueAttr_t printQueue_attributes = {
   .name = "printQueue"
+};
+/* Definitions for sensorsMutex */
+osMutexId_t sensorsMutexHandle;
+const osMutexAttr_t sensorsMutex_attributes = {
+  .name = "sensorsMutex"
 };
 /* Definitions for epsFlag */
 osEventFlagsId_t epsFlagHandle;
@@ -231,6 +236,9 @@ int main(void)
 
   /* Init scheduler */
   osKernelInitialize();
+  /* Create the mutex(es) */
+  /* creation of sensorsMutex */
+  sensorsMutexHandle = osMutexNew(&sensorsMutex_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -278,7 +286,6 @@ int main(void)
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
-  /* Create the event(s) */
   /* creation of epsFlag */
   epsFlagHandle = osEventFlagsNew(&epsFlag_attributes);
 
@@ -821,6 +828,52 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+ * @brief  Sends a command, waits for response, validates, and decodes it.
+ * @param  cmd_buf: Pointer to the KISS command packet to send
+ * @param  cmd_len: Length of the command
+ * @param  out_buf: Buffer to store the DECODED payload (without KISS bytes)
+ * @return uint16_t: Length of decoded payload (0 if failed)
+ */
+uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* out_buf)
+{
+    // 1. Clear Queue (Flush old/stale messages so we read the fresh response)
+    osMessageQueueReset(epsUartQueueHandle);
+
+    uint8_t frameRx[32];
+
+    HAL_StatusTypeDef hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,32);
+
+    if (hal_ret != HAL_OK){
+      return 0;
+    }
+
+    // 2. Transmit Command
+    if (HAL_UART_Transmit_IT(&EPS_UART, cmd_buf, cmd_len) != HAL_OK) {
+        return 0;
+    }
+    
+    // 3. Wait for Response (Timeout 500ms)
+    uint16_t rx_len;
+    osStatus_t status = osMessageQueueGet(epsUartQueueHandle, &rx_len, NULL, 500);
+
+    if (status != osOK) return 0; // Timeout
+
+   
+    if (rx_len == 0) return 0;
+
+    // 5. Validate KISS
+    if (KISS_ValidateFrame(frameRx, rx_len) != KISS_VALID_DATA) {
+        return 0; 
+    }
+
+    // 6. Decode SLIP (Remove Escapes)
+    // Returns the length of the clean data
+    return KISS_SLIP_DECODE(frameRx, rx_len, out_buf);
+}
+
+
 // int _write(int file, char *ptr, int len)
 //{
 //     // Transmit data over the USB CDC VCP
@@ -872,6 +925,7 @@ void mainTask(void *argument)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
   printf("\ecStart of mainTask\r\n");
+  osThreadSuspend(sensorQueryHandle);
   gpio_t cs_flash = {
       .GPIOx = NOR_CS_GPIO_Port,
       .Pin = NOR_CS_Pin};
@@ -887,19 +941,10 @@ void mainTask(void *argument)
       .rst_pin = rst_flash,
   };
 
-  tmp1075_t temp_sen = {
-      .tmp1075_i2c_hal.hi2c = &hi2c4,
-      .address = 0x48,
-  };
 
-  rv3028c7_t rtc = {
-      .rv3028c7_i2c_hal.hi2c = &hi2c4,
-      .address = 0x52,
-  };
 
   mt25q_init(&flash);
-  tmp1075_init(&temp_sen);
-  rv3028c7_init(&rtc);
+
   printf("Program Start\r\n");
   
   fs_init(&flash);
@@ -939,43 +984,38 @@ void mainTask(void *argument)
     printf("Reset by IWDG\r\n");
   }
 
+  osThreadResume(sensorQueryHandle);
+  obc_sensor_data_t _obc_sensor;
+
   /* Infinite loop */
   for(;;)
   {
-    int32_t temp = 0;
-    hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
-    if (ret != hal_ok)
-    {
-      printf("Read Temperature Error");
+ 
+    osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
+    if (os_ret != osOK){
+      printf("Aquire OBC Sensor error\r\n");
     }
-    else
-    {
-      printf("Temperature : %ld\r\n", temp);
+    else{
+      _obc_sensor.temp = obc_sensors_data.temp;
+      _obc_sensor.datetime = obc_sensors_data.datetime;
+      osMutexRelease(sensorsMutexHandle);
+      printf("Temperature : %ld\r\n", _obc_sensor.temp);
+      printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensor.datetime.year, _obc_sensor.datetime.month, _obc_sensor.datetime.day, _obc_sensor.datetime.hour, _obc_sensor.datetime.min, _obc_sensor.datetime.sec);
     }
+    // }
 
-    date_time_t datetime;
-    ret = rv3028c7_read_time(&rtc, &datetime);
-    if (ret != hal_ok)
-    {
-      printf("Read RTC Error");
-    }
-    else
-    {
-      printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", datetime.year, datetime.month, datetime.day, datetime.hour, datetime.min, datetime.sec);
-    }
-
-    printf("Polling EPS through Flag...\r\n");
-    osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
-    uint32_t flag_ret = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS | EPS_FLAG_POLL_ERROR, osFlagsWaitAny,1000);
-    if (flag_ret & EPS_FLAG_POLL_SUCCESS){
-      printf("Main Thread : Poll Success\r\n");
-    }
-    else if (flag_ret & EPS_FLAG_POLL_ERROR){
-      printf("Main Thread : Poll Error\r\n");
-    }
-    else if (flag_ret & EVENT_FLAG_ERROR){
-      printf("Main Thread : No Response or Flag Error\r\n");
-    }
+    // printf("Polling EPS through Flag...\r\n");
+    // osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
+    // uint32_t flag_ret = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS | EPS_FLAG_POLL_ERROR, osFlagsWaitAny,1000);
+    // if (flag_ret & EPS_FLAG_POLL_SUCCESS){
+    //   printf("Main Thread : Poll Success\r\n");
+    // }
+    // else if (flag_ret & EPS_FLAG_POLL_ERROR){
+    //   printf("Main Thread : Poll Error\r\n");
+    // }
+    // else if (flag_ret & EVENT_FLAG_ERROR){
+    //   printf("Main Thread : No Response or Flag Error\r\n");
+    // }
 
     printf("\r\n");
     osDelay(1000);
@@ -1055,73 +1095,111 @@ void wdtFeedTask(void *argument)
 void sensorQueryTask(void *argument)
 {
   /* USER CODE BEGIN sensorQueryTask */
-  typedef enum{
-    NO_MSG,
-    FOUND_FRAME,
-    FRAME_CPLT,
-  } rx_state;
-  rx_state state = NO_MSG;
-  
-  // Blocking Mode Experiment
-  uint8_t frameRx[EPS_RECV_LEN];
-  uint8_t decodedRx[EPS_RECV_LEN];
-  uint16_t rxLen = 32;
-  uint16_t actualRxLen = 0;
 
-  typedef struct eps_solar {
-    int16_t voltage;
-    int16_t current;
-    int8_t channel;
-  } eps_solar_t;
+  eps_sensor_data_t _eps_sensors;
 
-  eps_solar_t solar1;
+  tmp1075_t temp_sen = {
+    .tmp1075_i2c_hal.hi2c = &hi2c4,
+    .address = 0x48,
+  };
 
+  rv3028c7_t rtc = {
+      .rv3028c7_i2c_hal.hi2c = &hi2c4,
+      .address = 0x52,
+  };
+  tmp1075_init(&temp_sen);
+  rv3028c7_init(&rtc);
   for (;;)
   {
-    osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
-    
-    HAL_StatusTypeDef ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,rxLen);
-    
-    // 1. Send Query
-    uint8_t queryData[] = {0xC0, 0x00, 0x01, 0xC0};
-    ret = HAL_UART_Transmit_IT(&EPS_UART, queryData, 4);
-
-
-    osStatus_t queueStatus = osMessageQueueGet(epsUartQueueHandle,&actualRxLen,NULL,500);
-    if (queueStatus == osOK && ret == HAL_OK){
-      uint16_t msgLen = 0;
-      for (int i = 0; i < actualRxLen; i++){
-        msgLen++;
-        if (frameRx[i] == FEND){
-          if (state == NO_MSG){
-            state = FOUND_FRAME;
-          }
-          else if (state == FOUND_FRAME){
-            state = FRAME_CPLT;
-            break;
-          }
-        }
-      }
-      if (state == FRAME_CPLT){
-        state = NO_MSG;
-        uint16_t decoded_len = KISS_SLIP_DECODE(frameRx,msgLen,decodedRx);
-        printf("Decoded Length %u\r\n",decoded_len);
-        solar1.voltage = (decodedRx[1] << 8) | decodedRx[0]; 
-        solar1.current = (decodedRx[3] << 8) | decodedRx[2]; 
-        solar1.channel = decodedRx[4]; 
-        printf("Voltage %dmV, Current %dmA, Channel %d\r\n",solar1.voltage,solar1.current,solar1.channel);
-        actualRxLen = 0;
-        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_SUCCESS);
-
-      }
-      else{
-        osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
-      }
-      
+    // osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
+    int32_t temp = 0;
+    hal_status_t ret = tmp1075_read_temp(&temp_sen, &temp);
+    if (ret != hal_ok)
+    {
+      printf("Read Temperature Error");
     }
-    else {
-      osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_ERROR);
+    date_time_t datetime;
+    ret = rv3028c7_read_time(&rtc, &datetime);
+    if (ret != hal_ok)
+    {
+      printf("Read RTC Error");
     }
+
+    /* Perform VI Sensor Reads for 6 Channel */
+    for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
+      eps_command_t cmd;
+      uint8_t eps_data[32];
+      eps_get_vi_sensor_kiss_command(i,&cmd);
+      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
+      if (decoded_len == 0){
+        _eps_sensors.vi_sensor[i].data_state = EPS_DATA_ERROR;
+        continue;
+      }
+      _eps_sensors.vi_sensor[i].voltage = (eps_data[1] << 8) | eps_data[0];
+      _eps_sensors.vi_sensor[i].current = (eps_data[3] << 8) | eps_data[2];
+      _eps_sensors.vi_sensor[i].channel = eps_data[4];
+      _eps_sensors.vi_sensor[i].data_state = EPS_DATA_OK;
+    }
+
+    /* Perform Output Sensor Reads for 6 Channel */
+    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+      eps_command_t cmd;
+      uint8_t eps_data[32];
+      eps_get_output_sensor_kiss_command(i,&cmd);
+      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
+      if (decoded_len == 0){
+        _eps_sensors.output_sensor[i].data_state = EPS_DATA_ERROR;
+        continue;
+      }
+      _eps_sensors.output_sensor[i].voltage = (eps_data[1] << 8) | eps_data[0];
+      _eps_sensors.output_sensor[i].current = (eps_data[3] << 8) | eps_data[2];
+      _eps_sensors.output_sensor[i].channel = eps_data[4];
+      _eps_sensors.output_sensor[i].data_state = EPS_DATA_OK;
+    }
+
+    /* Perform Output State Reads for 6 Channel */
+    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+      eps_command_t cmd;
+      uint8_t eps_data[32];
+      eps_get_output_state_kiss_command(i,&cmd);
+      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
+      if (decoded_len == 0){
+        _eps_sensors.output_sensor[i].data_state = EPS_DATA_ERROR;
+        continue;
+      }
+      _eps_sensors.output_state[i].status = eps_data[0];
+      _eps_sensors.output_state[i].channel = eps_data[1];
+      _eps_sensors.output_state[i].data_state = EPS_DATA_OK;
+    }
+
+    /* Perform Battery Temperatures Reads for 6 Channel */
+    for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
+      eps_command_t cmd;
+      uint8_t eps_data[32];
+      eps_get_battery_temperature_kiss_command(i,&cmd);
+      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
+      if (decoded_len == 0){
+        _eps_sensors.output_sensor[i].data_state = EPS_DATA_ERROR;
+        continue;
+      }
+      memcpy(&_eps_sensors.battery_temperature[i].temperature, &eps_data[0], sizeof(float));
+      _eps_sensors.battery_temperature[i].channel = eps_data[4];
+      _eps_sensors.battery_temperature[i].data_state = EPS_DATA_OK;
+    }
+    
+    osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,500);
+    if (os_ret == osOK){
+      obc_sensors_data.temp = temp;
+      obc_sensors_data.datetime = datetime;
+      eps_sensors_data = _eps_sensors;
+      osMutexRelease(sensorsMutexHandle);
+    }
+    else{
+      printf("Aquire OBC for Sending Sensor error\r\n");
+    }
+
+    osDelay(1000);
+
   }
   /* USER CODE END sensorQueryTask */
 }
