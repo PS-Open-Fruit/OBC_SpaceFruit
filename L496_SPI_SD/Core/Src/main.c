@@ -251,6 +251,7 @@ int main(void)
     uint8_t receiveState = 0; 
     char currentFilename[64] = {0};
     uint32_t startTime = 0;
+    uint32_t transferCount = 0;
     
     printf("Waiting for command...\r\n");
 
@@ -265,32 +266,40 @@ int main(void)
          if (receiveState == 1 && (HAL_GetTick() - lastByteTime) > 3000) {
              printf("\r\nEnd of transmission (Timeout). Closing file.\r\n");
              f_close(&fil);
-             
-              // Calc Speed
-              uint32_t endTime = HAL_GetTick();
-              uint32_t duration_ms = endTime - startTime;
-              if (duration_ms == 0) duration_ms = 1;
-              uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
-              printf("Duration: %lu ms\r\n", duration_ms);
-              printf("Received: %lu bytes\r\n", totalBytesReceived);
-              printf("Speed: %lu.%02lu KB/s\r\n", (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
-              
-              // --- Save Log to SD Card ---
-              FIL logFile;
-              if(f_open(&logFile, "log.txt", FA_OPEN_APPEND | FA_WRITE) == FR_OK) {
-                  char logBuf[128];
-                  int len = snprintf(logBuf, sizeof(logBuf), "Tick:%lu, File:%s, Size:%lu B, Time:%lu ms, Speed:%lu.%02lu KB/s\r\n", 
-                                     HAL_GetTick(), currentFilename, totalBytesReceived, duration_ms, (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
-                  
-                  UINT bw_log;
-                  f_write(&logFile, logBuf, len, &bw_log);
-                  f_close(&logFile);
-                  printf("Log saved to log.txt\r\n");
-              } else {
-                  printf("Failed to open log.txt\r\n");
-              }
 
-              break; // Exit Experiment Loop
+             // Increment Iteration
+             transferCount++;
+
+             // Calc Speed
+             uint32_t endTime = HAL_GetTick();
+             uint32_t duration_ms = endTime - startTime;
+             if (duration_ms == 0) duration_ms = 1;
+             uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
+             printf("Iter: %lu, Duration: %lu ms\r\n", transferCount, duration_ms);
+             printf("Received: %lu bytes\r\n", totalBytesReceived);
+             printf("Speed: %lu.%02lu KB/s\r\n", (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
+
+             // --- Save Log to SD Card ---
+             FIL logFile;
+             if(f_open(&logFile, "log.txt", FA_OPEN_APPEND | FA_WRITE) == FR_OK) {
+                 char logBuf[128];
+                 int len = snprintf(logBuf, sizeof(logBuf), "Iter:%lu, Tick:%lu, File:%s, Size:%lu B, Time:%lu ms, Speed:%lu.%02lu KB/s\r\n",
+                                    transferCount, HAL_GetTick(), currentFilename, totalBytesReceived, duration_ms, (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
+
+                 UINT bw_log;
+                 f_write(&logFile, logBuf, len, &bw_log);
+                 f_close(&logFile);
+                 printf("Log saved to log.txt\r\n");
+             } else {
+                 printf("Failed to open log.txt\r\n");
+             }
+
+             // Reset State for next transfer
+             receiveState = 0;
+             totalBytesReceived = 0;
+             memset(currentFilename, 0, sizeof(currentFilename));
+             printf("\r\nReady for next command...\r\n");
+             // Do not break; continue loop
           }
          
          // Process Buffer A

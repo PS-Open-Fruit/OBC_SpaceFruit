@@ -116,14 +116,45 @@ def send_file(serial_port, file_path):
     except Exception as e:
         print(f"\nError: {e}")
 
-def main():
-    # 1. Port Selection (Hardcoded to COM3)
-    selected_port = 'COM7'
-    print(f"Using Port: {selected_port}")
 
-    # 3. Send File directly
+def main():
+    # 1. Port Selection (Hardcoded to COM7)
+    selected_port = 'COM3'
+    print(f"Using Port: {selected_port}")
     print(f"\nTarget File: {TARGET_FILE}")
-    send_file(selected_port, TARGET_FILE)
+
+    # Log file
+    log_file = "pc_sender_log.txt"
+    if not os.path.exists(log_file):
+        with open(log_file, "w") as f:
+            f.write("Timestamp,Status,Message\n")
+
+    iteration = 0
+    while True:
+        iteration += 1
+        print(f"\n--- Iteration {iteration} ---")
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{timestamp}] Starting transfer...")
+            
+            # Send File
+            send_file(selected_port, TARGET_FILE)
+            
+            # Log Success (We assume success if send_file returns without crashing, 
+            # though send_file logs errors internally)
+            # A better way would be to have send_file return status, but for now we log that we attempted.
+            with open(log_file, "a") as f:
+                f.write(f"{timestamp},Attempted,Iteration {iteration}\n")
+
+        except Exception as e:
+             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+             print(f"Error in iteration {iteration}: {e}")
+             with open(log_file, "a") as f:
+                f.write(f"{timestamp},Error,{str(e)}\n")
+
+        # Wait 20 seconds
+        print("\nWaiting 20 seconds before next transfer...")
+        time.sleep(20)
 
 if __name__ == "__main__":
     main()
