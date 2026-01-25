@@ -322,6 +322,20 @@ int main(void)
 
                      printf("CMD Received. File: %s\r\n", currentFilename);
                      fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
+                     
+                     // Retry logic for robust long-running
+                     if (fres != FR_OK) {
+                         printf("File Open Failed (%d). Attempting Remount...\r\n", fres);
+                         f_mount(NULL, "", 0); // Unmount
+                         HAL_Delay(50);
+                         fres = f_mount(&FatFs, "", 1); // Remount
+                         if (fres == FR_OK) {
+                              fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
+                         } else {
+                              printf("Remount failed (%d)\r\n", fres);
+                         }
+                     }
+
                      if(fres == FR_OK) {
                          receiveState = 1;
                          startTime = HAL_GetTick();
@@ -366,6 +380,20 @@ int main(void)
 
                      printf("CMD Received (B). File: %s\r\n", currentFilename);
                      fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
+                     
+                     // Retry logic for robust long-running
+                     if (fres != FR_OK) {
+                         printf("File Open Failed (%d). Attempting Remount...\r\n", fres);
+                         f_mount(NULL, "", 0); // Unmount
+                         HAL_Delay(50);
+                         fres = f_mount(&FatFs, "", 1); // Remount
+                         if (fres == FR_OK) {
+                              fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
+                         } else {
+                              printf("Remount failed (%d)\r\n", fres);
+                         }
+                     }
+
                      if(fres == FR_OK) {
                          receiveState = 1;
                          startTime = HAL_GetTick();
