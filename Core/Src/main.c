@@ -634,7 +634,7 @@ static void MX_UART5_Init(void)
 
   /* USER CODE END UART5_Init 1 */
   huart5.Instance = UART5;
-  huart5.Init.BaudRate = 115200;
+  huart5.Init.BaudRate = 230400;
   huart5.Init.WordLength = UART_WORDLENGTH_8B;
   huart5.Init.StopBits = UART_STOPBITS_1;
   huart5.Init.Parity = UART_PARITY_NONE;
@@ -841,12 +841,17 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
     // 1. Clear Queue (Flush old/stale messages so we read the fresh response)
     osMessageQueueReset(epsUartQueueHandle);
 
-    uint8_t frameRx[32];
+    uint8_t frameRx[32] = {0};
 
     HAL_StatusTypeDef hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,32);
 
-    if (hal_ret != HAL_OK){
-      return 0;
+    if (hal_ret == HAL_BUSY) {
+        HAL_UART_AbortReceive(&EPS_UART);
+        hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART, frameRx, 32);
+    }
+
+    if (hal_ret != HAL_OK) {
+        return 0;
     }
 
     // 2. Transmit Command
@@ -857,6 +862,13 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
     // 3. Wait for Response (Timeout 500ms)
     uint16_t rx_len;
     osStatus_t status = osMessageQueueGet(epsUartQueueHandle, &rx_len, NULL, 500);
+
+    if (status != osOK) { 
+      // We timed out. The UART is likely still waiting for data.
+      // We MUST stop it, otherwise the next call will fail with HAL_BUSY.
+      HAL_UART_AbortReceive(&EPS_UART); 
+      return 0; 
+    }
 
     if (status != osOK) return 0; // Timeout
 
@@ -985,23 +997,80 @@ void mainTask(void *argument)
   }
 
   osThreadResume(sensorQueryHandle);
-  obc_sensor_data_t _obc_sensor;
+  obc_sensor_data_t _obc_sensors;
+  eps_sensor_data_t _eps_sensors;
+
+  uint8_t sensors_data_ready = 0;
+
+   rv3028c7_t rtc = {
+      .rv3028c7_i2c_hal.hi2c = &hi2c4,
+      .address = 0x52,
+  };
+  rv3028c7_init(&rtc);
+  date_time_t datetime;
 
   /* Infinite loop */
   for(;;)
   {
- 
+    sensors_data_ready = 0;
+    HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
     osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
     if (os_ret != osOK){
       printf("Aquire OBC Sensor error\r\n");
     }
     else{
-      _obc_sensor.temp = obc_sensors_data.temp;
-      _obc_sensor.datetime = obc_sensors_data.datetime;
+      _obc_sensors.temp = obc_sensors_data.temp;
+      _obc_sensors.datetime = datetime;
+      _eps_sensors = eps_sensors_data;
+      sensors_data_ready = 1;
       osMutexRelease(sensorsMutexHandle);
-      printf("Temperature : %ld\r\n", _obc_sensor.temp);
-      printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensor.datetime.year, _obc_sensor.datetime.month, _obc_sensor.datetime.day, _obc_sensor.datetime.hour, _obc_sensor.datetime.min, _obc_sensor.datetime.sec);
     }
+    if (!sensors_data_ready){
+      continue;
+    }
+    printf("Temperature : %ld\r\n", _obc_sensors.temp);
+    printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
+
+    for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
+      uint8_t channel = _eps_sensors.vi_sensor[i].channel;
+      int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
+      int16_t current = _eps_sensors.vi_sensor[i].current;
+      eps_data_state data_state = _eps_sensors.vi_sensor[i].data_state;
+      if (data_state == EPS_DATA_OK){
+        printf("VI Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+      }
+    }
+
+    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+      uint8_t channel = _eps_sensors.output_sensor[i].channel;
+      int16_t voltage = _eps_sensors.output_sensor[i].voltage;
+      int16_t current = _eps_sensors.output_sensor[i].current;
+      eps_data_state data_state = _eps_sensors.output_sensor[i].data_state;
+      if (data_state == EPS_DATA_OK){
+        printf("Output Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+      }
+    }
+
+    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+      uint8_t channel = _eps_sensors.output_state[i].channel;
+      uint8_t status = _eps_sensors.output_state[i].status;
+      eps_data_state data_state = _eps_sensors.output_state[i].data_state;
+      if (data_state != EPS_DATA_OK){
+        continue;
+      }
+      printf("Output State CH %d, State %d\r\n",channel,status);
+    }
+
+    for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
+      uint8_t channel = _eps_sensors.battery_temperature[i].channel;
+      int16_t temp = _eps_sensors.battery_temperature[i].temperature * 10000;
+      eps_data_state data_state = _eps_sensors.battery_temperature[i].data_state;
+      if (data_state != EPS_DATA_OK){
+        continue;
+      }
+      printf("Battery Temperature CH %d, State %d\r\n",channel,temp);
+    }
+
     // }
 
     // printf("Polling EPS through Flag...\r\n");
@@ -1103,12 +1172,9 @@ void sensorQueryTask(void *argument)
     .address = 0x48,
   };
 
-  rv3028c7_t rtc = {
-      .rv3028c7_i2c_hal.hi2c = &hi2c4,
-      .address = 0x52,
-  };
+ 
   tmp1075_init(&temp_sen);
-  rv3028c7_init(&rtc);
+  
   for (;;)
   {
     // osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
@@ -1118,19 +1184,20 @@ void sensorQueryTask(void *argument)
     {
       printf("Read Temperature Error");
     }
-    date_time_t datetime;
-    ret = rv3028c7_read_time(&rtc, &datetime);
+    
+    
     if (ret != hal_ok)
     {
       printf("Read RTC Error");
     }
-
+    printf("Loops Sensor Query Runs normally\r\n");
     /* Perform VI Sensor Reads for 6 Channel */
     for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
       eps_command_t cmd;
-      uint8_t eps_data[32];
+      uint8_t eps_data[32] = {0};
       eps_get_vi_sensor_kiss_command(i,&cmd);
       uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
+      // printf("Decoded LEN %d\r\n",decoded_len);
       if (decoded_len == 0){
         _eps_sensors.vi_sensor[i].data_state = EPS_DATA_ERROR;
         continue;
@@ -1144,7 +1211,7 @@ void sensorQueryTask(void *argument)
     /* Perform Output Sensor Reads for 6 Channel */
     for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
       eps_command_t cmd;
-      uint8_t eps_data[32];
+      uint8_t eps_data[32] = {0};
       eps_get_output_sensor_kiss_command(i,&cmd);
       uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
       if (decoded_len == 0){
@@ -1160,7 +1227,7 @@ void sensorQueryTask(void *argument)
     /* Perform Output State Reads for 6 Channel */
     for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
       eps_command_t cmd;
-      uint8_t eps_data[32];
+      uint8_t eps_data[32] = {0};
       eps_get_output_state_kiss_command(i,&cmd);
       uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
       if (decoded_len == 0){
@@ -1175,7 +1242,7 @@ void sensorQueryTask(void *argument)
     /* Perform Battery Temperatures Reads for 6 Channel */
     for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
       eps_command_t cmd;
-      uint8_t eps_data[32];
+      uint8_t eps_data[32] = {0};
       eps_get_battery_temperature_kiss_command(i,&cmd);
       uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
       if (decoded_len == 0){
@@ -1187,10 +1254,11 @@ void sensorQueryTask(void *argument)
       _eps_sensors.battery_temperature[i].data_state = EPS_DATA_OK;
     }
     
+    
     osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,500);
     if (os_ret == osOK){
       obc_sensors_data.temp = temp;
-      obc_sensors_data.datetime = datetime;
+      // obc_sensors_data.datetime = datetime;
       eps_sensors_data = _eps_sensors;
       osMutexRelease(sensorsMutexHandle);
     }
