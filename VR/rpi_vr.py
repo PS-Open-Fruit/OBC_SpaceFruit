@@ -75,7 +75,53 @@ def get_throttled():
         return 0
 
 # ==========================================
-# 3. VR Simulator Logic
+# 3. Utilities for SSDV
+# ==========================================
+
+def ensure_baseline_jpeg(input_file, output_file):
+    """
+    Checks if JPEG is baseline and converts if necessary using ImageMagick.
+    SSDV requires standard baseline JPEG.
+    """
+    try:
+        # We blindly run convert (ImageMagick) to force baseline. 
+        # -interlace None ensures it is NOT progressive.
+        # -type TrueColor ensures standard color space.
+        # -sampling-factor 2x2 ensures YUV 4:2:0 which is standard for SSDV
+        cmd = ["convert", input_file, "-strip", "-interlace", "None", "-type", "TrueColor", "-sampling-factor", "2x2", output_file]
+        print(f"   ⚙️ Converting to Baseline JPEG: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception as e:
+        print(f"   ⚠️ ImageMagick ('convert') failed: {e}. Passing file as-is.")
+        # If input != output, try to copy
+        if input_file != output_file:
+            try:
+                with open(input_file, 'rb') as f_in, open(output_file, 'wb') as f_out:
+                    f_out.write(f_in.read())
+            except: pass
+        return False
+
+def encode_ssdv(input_image, output_bin, callsign="KNACKSAT", img_id=1):
+    """
+    Encodes a JPEG image to SSDV binary format.
+    Requires 'ssdv' command line tool installed.
+    """
+    try:
+        # ssdv -e -c CALLSIGN -i ID input.jpg output.bin
+        cmd = ["ssdv", "-e", "-c", callsign, "-i", str(img_id), input_image, output_bin]
+        print(f"   🎞️ Encoding SSDV: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if os.path.exists(output_bin):
+            return os.path.getsize(output_bin)
+    except Exception as e:
+        print(f"   ⚠️ SSDV Encoding Failed: {e}. (Is 'ssdv' installed?)")
+    
+    return 0
+
+# ==========================================
+# 4. VR Simulator Logic
 # ==========================================
 
 class RPiVRSimulator:
@@ -93,13 +139,13 @@ class RPiVRSimulator:
     def capture_real_image(self, img_id):
         """Captures a real JPEG using rpicam-still."""
         filename = f"mission_img_{img_id:04d}.jpg"
-        # 1296x972 is a good binning mode for v2/v3 cameras
+        # 1280x960 is 4:3 and both divisible by 16 (MCU blocks) for SSDV
         cmd = [
             "rpicam-still", 
             "-o", filename, 
             "-t", "500",         # 500ms delay for Auto-Exposure/White Balance
-            "--width", "1296",   
-            "--height", "972",
+            "--width", "1280",   
+            "--height", "960",
             "--nopreview"
         ]
         
@@ -223,11 +269,35 @@ class RPiVRSimulator:
         elif cmd_id == 0x12: # Capture
             self.img_counter += 1
             
-            # Attempt Real Capture
-            size = self.capture_real_image(self.img_counter)
+            # 1. Attempt Real Capture (Raw JPEG)
+            raw_jpg = f"temp_raw_{self.img_counter}.jpg"
+            baseline_jpg = f"mission_img_{self.img_counter:04d}.jpg"
+            ssdv_bin = f"mission_img_{self.img_counter:04d}.bin"
             
-            if size == 0:
-                print("   ⚠️ Capture failed (or no camera). Sending size 0.")
+            # Temporary redirect capture to raw file
+            # Note: We need to modify capture_real_image slightly or just rename inside it.
+            # For minimal invasion, let's just let capture_real_image write to its default name
+            # which is f"mission_img_{img_id:04d}.jpg".
+            
+            size = self.capture_real_image(self.img_counter) # Writes to mission_img_XXXX.jpg
+            
+            captured_file = self.last_captured_file
+            
+            if size > 0 and captured_file:
+                # 2. Convert to Baseline (in-place or to temp)
+                # We overwrite the original to save space/confusion
+                ensure_baseline_jpeg(captured_file, captured_file)
+                
+                # 3. Encode to SSDV
+                ssdv_size = encode_ssdv(captured_file, ssdv_bin, callsign="KNCK", img_id=self.img_counter)
+                
+                if ssdv_size > 0:
+                    print(f"   ✅ SSDV Ready: {ssdv_bin} ({ssdv_size} bytes)")
+                    self.last_captured_file = ssdv_bin
+                    self.last_file_size = ssdv_size
+                    size = ssdv_size # Report SSDV size to GS
+                else:
+                    print("   ⚠️ Sending raw JPEG (SSDV failed)")
             
             # Request Payload: [ImgID] [Size] [CRC32]
             file_crc = 0

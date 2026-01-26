@@ -5,6 +5,10 @@ import sys
 import os
 import struct
 import zlib
+import subprocess
+import shutil
+from http.server import SimpleHTTPRequestHandler
+from socketserver import TCPServer
 
 # Import KISS Protocol
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,12 +34,35 @@ if not os.path.exists(DOWNLOAD_DIR):
 # ==========================================
 # 2. Ground Station Class
 # ==========================================
+
+class WebDashboard:
+    def __init__(self, port=8000, web_dir="web"):
+        self.port = port
+        self.web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), web_dir)
+        self.thread = threading.Thread(target=self._run_server, daemon=True)
+        self.thread.start()
+        print(f"   🌐 Dashboard active at http://localhost:{port}")
+        
+    def _run_server(self):
+        class Handler(SimpleHTTPRequestHandler):
+            def __init__(req_self, *args, **kwargs):
+                super().__init__(*args, directory=self.web_dir, **kwargs)
+            def log_message(self, format, *args):
+                pass # Suppress logging
+
+        with TCPServer(("", self.port), Handler) as httpd:
+            httpd.serve_forever()
+
 class GroundStation:
     def __init__(self, port='COM9', baud=9600):
         self.port = port
         self.baud = baud
         self.ser = None
         self.running = True
+        
+        # Web Dashboard
+        self.dashboard = WebDashboard()
+        self.last_dashboard_update = 0
         
         # Image Transfer State
         self.current_img_data = bytearray()
@@ -210,6 +237,13 @@ class GroundStation:
             self.current_img_data = bytearray()
             self.received_chunk_ids = set()
             self.start_time = time.time()
+            
+            # Reset Dashboard
+            try:
+                placeholder = os.path.join(self.dashboard.web_dir, "live.jpg")
+                if os.path.exists(placeholder): os.remove(placeholder)
+            except: pass
+            
             return
             
         # CMD 0x21: VR Status Report (Raw Data)
@@ -281,9 +315,33 @@ class GroundStation:
             self.received_chunk_ids.add(chunk_id)
             self.current_img_data.extend(img_chunk)
             self.print_progress()
+            
+            # Update Dashboard (Throttle: Max 1Hz)
+            if time.time() - self.last_dashboard_update > 1.0:
+                self.update_dashboard()
+                self.last_dashboard_update = time.time()
+                
             return
 
         print(f"   Rx Unknown CMD: 0x{cmd_byte:02X}")
+
+    def update_dashboard(self):
+        """Attempts to decode partial SSDV data for the dashboard."""
+        if not self.current_img_data: return
+        
+        bin_path = os.path.join(self.dashboard.web_dir, "temp.bin")
+        jpg_path = os.path.join(self.dashboard.web_dir, "live.jpg")
+        
+        try:
+            with open(bin_path, "wb") as f:
+                f.write(self.current_img_data)
+                
+            # Run SSDV Decoder
+            # ssdv -d input.bin output.jpg
+            subprocess.run(["ssdv", "-d", bin_path, jpg_path], 
+                           check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass # Fail silently (e.g. missing ssdv tool)
 
     def process_log_line(self, text):
         """Parses ASCII log lines."""
@@ -291,11 +349,24 @@ class GroundStation:
         
         # 1. Detect End of Download
         if "Download Complete!" in text:
-            filename = os.path.join(DOWNLOAD_DIR, f"img_{int(time.time())}.jpg")
-            with open(filename, "wb") as f:
+            # Save raw SSDV bin
+            timestamp = int(time.time())
+            filename_bin = os.path.join(DOWNLOAD_DIR, f"img_{timestamp}.bin")
+            filename_jpg = os.path.join(DOWNLOAD_DIR, f"img_{timestamp}.jpg")
+            
+            with open(filename_bin, "wb") as f:
                 f.write(self.current_img_data)
             
-            print(f"\n   IMAGE SAVED: {filename}")
+            print(f"\n   FILE SAVED: {filename_bin}")
+            
+            # Try to decode final JPG
+            try:
+                subprocess.run(["ssdv", "-d", filename_bin, filename_jpg], 
+                              check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"   decoded -> {filename_jpg}")
+            except:
+                print("   (SSDV Decode skipped - tool missing)")
+
             if self.expected_size > 0:
                 loss = 100 * (1 - len(self.current_img_data) / self.expected_size)
                 if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
