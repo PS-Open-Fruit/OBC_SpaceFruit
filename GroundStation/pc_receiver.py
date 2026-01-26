@@ -204,6 +204,60 @@ class GroundStation:
             self.received_chunk_ids = set()
             self.start_time = time.time()
             return
+            
+        # CMD 0x21: VR Status Report (Raw Data)
+        if cmd_byte == 0x21:
+            # Payload Structure: [VR Data...] [VR CRC (4 bytes)]
+            
+            pl = payload_body
+            pl_len = len(pl)
+
+            # Robust unpacking (ignore tail CRC)
+            try:
+                if pl_len >= 17: # Handle Throttled (17 bytes)
+                    cpu = pl[0]
+                    temp, ram, disk, uptime, throttled = struct.unpack('<fHIIH', pl[1:17])
+                    
+                    # Decode Throttled (Bits 0-19)
+                    status_flags = []
+                    if throttled & 0x1: status_flags.append("⚡ UV LO")
+                    if throttled & 0x2: status_flags.append("📉 FRQ CAP")
+                    if throttled & 0x4: status_flags.append("🔥 THRTL")
+                    if throttled & 0x8: status_flags.append("🌡️ SOFT T")
+                    
+                    hist_flags = []
+                    if throttled & 0x10000: hist_flags.append("Was UV")
+                    if throttled & 0x40000: hist_flags.append("Was Thrtl")
+                    
+                    throttled_str = "OK"
+                    if status_flags: throttled_str = " | ".join(status_flags)
+                    if hist_flags: throttled_str += f" (History: {', '.join(hist_flags)})"
+                    
+                elif pl_len >= 15: # Handle Uptime (15 bytes)
+                    cpu = pl[0]
+                    temp, ram, disk, uptime = struct.unpack('<fHII', pl[1:15])
+                    throttled_str = "N/A"
+                    
+                else: 
+                     print(f"   [RX] VR Status Too Short: {pl_len}")
+                     return
+
+                print(f"\n   📊 [VR STATUS DASHBOARD]")
+                print(f"   ----------------------------------")
+                print(f"   ⏱️  Uptime : {uptime} s ({uptime/3600:.1f} h)")
+                print(f"   🧠 CPU    : {cpu}%")
+                print(f"   🌡️  Temp   : {temp:.1f} °C")
+                print(f"   💾 RAM    : {ram} MB Free")
+                print(f"   💿 Disk   : {disk} MB Free")
+                print(f"   ⚠️  Health : {throttled_str}")
+                print(f"   ----------------------------------\n")
+                sys.stdout.write("GS> ")
+                sys.stdout.flush()
+                
+            except Exception as e:
+                print(f"   [RX] Error parsing status: {e}")
+
+            return
 
         # CMD 0x00: Image Data (Space Ready Format)
         if cmd_byte == 0x00:

@@ -56,6 +56,23 @@ def get_disk_free():
     except:
         return 0
 
+def get_uptime():
+    """Returns uptime in seconds."""
+    try:
+        with open('/proc/uptime', 'r') as f:
+            return int(float(f.read().split()[0]))
+    except:
+        return 0
+
+def get_throttled():
+    """Returns throttled state from vcgencmd."""
+    try:
+        output = subprocess.check_output(["vcgencmd", "get_throttled"]).decode()
+        # Output format: throttled=0x0
+        return int(output.split('=')[1], 0)
+    except:
+        return 0
+
 # ==========================================
 # 3. VR Simulator Logic
 # ==========================================
@@ -195,10 +212,12 @@ class RPiVRSimulator:
             temp = get_rpi_temp()
             ram = get_free_ram()
             disk = get_disk_free()
+            uptime = get_uptime()
+            throttled = get_throttled()
             
             # Prepend 0x11 Command ID
             resp_payload = bytearray([0x11])
-            resp_payload.extend(struct.pack("<BfHI", cpu, temp, ram, disk))
+            resp_payload.extend(struct.pack("<BfHIIH", cpu, temp, ram, disk, uptime, throttled))
             
         elif cmd_id == 0x12: # Capture
             self.img_counter += 1

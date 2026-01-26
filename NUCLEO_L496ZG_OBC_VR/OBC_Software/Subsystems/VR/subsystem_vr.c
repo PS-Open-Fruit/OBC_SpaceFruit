@@ -77,22 +77,29 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
         }
 
         case VR_CMD_STATUS_RES: {
-            if (dec_len >= 12) {
-                uint8_t cpu = decoded[1];
-                float temp;
-                uint16_t ram;
-                uint32_t disk;
-                
-                memcpy(&temp, &decoded[2], 4);
-                memcpy(&ram, &decoded[6], 2);
-                memcpy(&disk, &decoded[8], 4);
-                
-                int t_int = (int)temp;
-                int t_dec = (int)((temp - t_int) * 10);
-                if (t_dec < 0) t_dec = -t_dec;
-                
-                OBC_Log("[VR] STATUS >> CPU: %d%% | Temp: %d.%d C | RAM: %d MB | Disk: %lu MB", cpu, t_int, t_dec, ram, disk);
-            }
+            // Forward status packet to GS (CMD 0x21)
+            // Payload: [0x21] + [VR_Payload] + [VR_CRC]
+            
+            // dec_len includes: [CMD 0x11] [Payload...] [CRC 4 bytes]
+            if (dec_len < 5) return;
+
+            // We include the RPi's CRC in the forwarded packet for transparency
+            uint16_t data_len = dec_len - 1; // Exclude RPi CMD 0x11
+            
+            uint8_t gs_payload[64];
+            gs_payload[0] = 0x21; // GS VR Status Report CMD
+            memcpy(&gs_payload[1], &decoded[1], data_len);
+            
+            // Append GS CRC
+            uint32_t crc_gs = OBC_Calculate_CRC(gs_payload, 1 + data_len);
+            memcpy(&gs_payload[1 + data_len], &crc_gs, 4);
+            
+            uint8_t tx_frame_gs[128];
+            uint16_t len_gs = SLIP_Encode(gs_payload, 1 + data_len + 4, tx_frame_gs);
+            HAL_UART_Transmit(&hlpuart1, tx_frame_gs, len_gs, 100);
+            
+            // Optional: Blink debug LED
+            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
             break;
         }
 
