@@ -29,13 +29,16 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
     
     // Calc CRC
     uint32_t calc_crc = OBC_Calculate_CRC(decoded, dec_len-4);
+    uint8_t cmd_id = decoded[0];
     
     if (calc_crc != rx_crc) {
-        OBC_Log("[VR] CRC Fail: %08X vs %08X", rx_crc, calc_crc);
-        return;
+        if (cmd_id == VR_CMD_CHUNK_RES) {
+             OBC_Log("[VR] CRC Fail on Img Chunk %02X! Forwarding for SSDV fix...", decoded[1]);
+        } else {
+             OBC_Log("[VR] CRC Fail: %08X vs %08X (Cmd: %02X). Dropped.", rx_crc, calc_crc, cmd_id);
+             return;
+        }
     }
-
-    uint8_t cmd_id = decoded[0];
 
     switch (cmd_id) {
         case VR_CMD_PING:

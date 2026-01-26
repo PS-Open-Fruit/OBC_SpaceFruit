@@ -176,8 +176,12 @@ class GroundStation:
         calc_crc = KISSProtocol.calculate_crc(data_content)
         
         if calc_crc != received_crc:
-            print(f"\n⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
-            return
+            if cmd_byte == 0x13: # Img Chunk
+                print(f"\n⚠️ CRC ERROR on Chunk (Passing to SSDV...) Calc {calc_crc:08X} != Rx {received_crc:08X}")
+                # Pass through for SSDV FEC to handle
+            else:
+                print(f"\n⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
+                return
 
         # 4. Dispatch
         payload_body = data_content[1:] # Exclude CMD
