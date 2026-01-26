@@ -85,6 +85,8 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             uint8_t tx_frame[32];
             uint16_t len = SLIP_Encode(req, 8, tx_frame);
             CDC_Transmit_FS(tx_frame, len);
+            
+            vr_state.last_chunk_req_tick = HAL_GetTick(); // Track Request Time
             break;
         }
 
@@ -169,6 +171,8 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
                      uint8_t tx_frame[32];
                      uint16_t len = SLIP_Encode(req, 8, tx_frame);
                      CDC_Transmit_FS(tx_frame, len);
+                     
+                     vr_state.last_chunk_req_tick = HAL_GetTick(); // Track Request Time
                  }
             }
             break;
@@ -207,6 +211,30 @@ void VR_Update(void) {
     if (now - last_ping > 2000) {
         last_ping = now;
         VR_SendCmd(VR_CMD_PING);
+    }
+    
+    // Chunk Retry Mechanism (Every 500ms if stuck)
+    if (vr_state.download_active && vr_state.is_online) {
+        if (now - vr_state.last_chunk_req_tick > 500) {
+             // Retry Request
+             uint8_t req[8];
+             req[0] = 0x00; 
+             req[1] = VR_CMD_CHUNK_RES;
+             req[2] = vr_state.next_chunk_to_req & 0xFF; // Request SAME chunk
+             req[3] = (vr_state.next_chunk_to_req >> 8) & 0xFF;
+             
+             uint32_t crc = OBC_Calculate_CRC(req, 4);
+             memcpy(&req[4], &crc, 4);
+             
+             uint8_t tx_frame[32];
+             uint16_t len = SLIP_Encode(req, 8, tx_frame);
+             CDC_Transmit_FS(tx_frame, len);
+             
+             vr_state.last_chunk_req_tick = now;
+             
+             // Log sparingly?
+             OBC_Log("[VR] Retry Chunk %d", vr_state.next_chunk_to_req);
+        }
     }
 }
 

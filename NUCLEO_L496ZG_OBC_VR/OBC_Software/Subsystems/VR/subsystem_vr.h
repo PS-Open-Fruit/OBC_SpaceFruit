@@ -18,6 +18,7 @@ typedef struct {
     uint16_t next_chunk_to_req;
     uint32_t last_seen_tick;
     uint8_t is_online;
+    uint32_t last_chunk_req_tick; // For retries
 } VR_State_t;
 
 void VR_Init(void);
