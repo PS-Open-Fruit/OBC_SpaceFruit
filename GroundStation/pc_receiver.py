@@ -327,7 +327,7 @@ class GroundStation:
                 
                 # Restore Prompt visually so user knows they can type
                 # Heuristic: Only show prompt if we are likely done with the sequence
-                if "GS CMD:" not in text:
+                if "GS CMD:" not in text or "Ping" in text:
                     sys.stdout.write("GS> ")
                     sys.stdout.flush()
 
