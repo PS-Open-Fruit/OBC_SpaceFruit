@@ -11,12 +11,19 @@ VR_State_t vr_state;
 void VR_Init(void) {
     vr_state.download_active = 0;
     vr_state.next_chunk_to_req = 0;
+    vr_state.last_seen_tick = 0;
+    vr_state.is_online = 0;
 }
 
 // Helper to Log via GS Link (duplicated from main.c for now, can be centralized later)
 extern void OBC_Log(const char *fmt, ...); 
 
 void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
+    // Mark VR as Online
+    uint8_t was_online = vr_state.is_online;
+    vr_state.is_online = 1;
+    vr_state.last_seen_tick = HAL_GetTick();
+
     // Validate CRC
     if (dec_len < 5) {
         OBC_Log("[VR] Error: Payload short (%d)", dec_len);
@@ -42,7 +49,9 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
 
     switch (cmd_id) {
         case VR_CMD_PING:
-            OBC_Log("[VR] >> PONG Received! Link Active.");
+            if (!was_online) {
+                OBC_Log("[VR] Connection Restored!");
+            }
             HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
             break;
             
@@ -185,5 +194,22 @@ void VR_SendCmd(uint8_t cmd_id) {
 }
 
 void VR_Update(void) {
-    // nothing for now, driven by packets
+    uint32_t now = HAL_GetTick();
+
+    // Check Timeout
+    if (vr_state.is_online && (now - vr_state.last_seen_tick > VR_TIMEOUT_MS)) {
+        vr_state.is_online = 0;
+        OBC_Log("[VR] Connection Lost (Timeout)");
+    }
+
+    // Auto-Ping (Keep-Alive)
+    static uint32_t last_ping = 0;
+    if (now - last_ping > 2000) {
+        last_ping = now;
+        VR_SendCmd(VR_CMD_PING);
+    }
+}
+
+uint8_t VR_IsOnline(void) {
+    return vr_state.is_online;
 }

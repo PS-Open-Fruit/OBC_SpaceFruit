@@ -406,15 +406,18 @@ void OBC_Process_Loop(void) {
              
              if (cmd_id == 0x12) { 
                  OBC_Log("[OBC] GS CMD: Capture!");
-                 VR_SendCmd(VR_CMD_CAPTURE_RES);
+                 if (VR_IsOnline()) VR_SendCmd(VR_CMD_CAPTURE_RES);
+                 else OBC_Log("[OBC] VR Offline! Cannot Capture.");
              }
              else if (cmd_id == 0x10) { 
                  OBC_Log("[OBC] GS CMD: Ping!");
-                 VR_SendCmd(VR_CMD_PING);
+                 if (VR_IsOnline()) VR_SendCmd(VR_CMD_PING);
+                 else OBC_Log("[OBC] VR Offline! Pong failed.");
              }
              else if (cmd_id == 0x20) { 
                  OBC_Log("[OBC] GS CMD: Status Req!");
-                 VR_SendCmd(VR_CMD_STATUS_RES); 
+                 if (VR_IsOnline()) VR_SendCmd(VR_CMD_STATUS_RES); 
+                 else OBC_Log("[OBC] VR Offline! No Status.");
              }
         }
         is_gs_frame_ready = 0;

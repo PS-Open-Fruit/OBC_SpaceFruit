@@ -199,7 +199,7 @@ class RPiVRSimulator:
 
         resp_payload = b''
 
-        if cmd_id != 0x13:
+        if cmd_id != 0x13 and cmd_id != 0x10:
             print(f"Cmd: 0x{cmd_id:02X}")
 
         # --- PAYLOAD SIMULATION (Actual Pi Data) ---
