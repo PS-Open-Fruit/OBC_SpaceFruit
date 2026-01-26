@@ -7,6 +7,7 @@ import struct
 import zlib
 import subprocess
 import shutil
+import json
 from http.server import SimpleHTTPRequestHandler
 from socketserver import TCPServer
 
@@ -36,7 +37,8 @@ if not os.path.exists(DOWNLOAD_DIR):
 # ==========================================
 
 class WebDashboard:
-    def __init__(self, port=8000, web_dir="web"):
+    def __init__(self, gs, port=8000, web_dir="web"):
+        self.gs = gs # Reference to GroundStation for callbacks
         self.port = port
         self.web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), web_dir)
         self.thread = threading.Thread(target=self._run_server, daemon=True)
@@ -44,11 +46,41 @@ class WebDashboard:
         print(f"   🌐 Dashboard active at http://localhost:{port}")
         
     def _run_server(self):
+        # Capture context for inner class
+        dashboard = self
+        
         class Handler(SimpleHTTPRequestHandler):
             def __init__(req_self, *args, **kwargs):
-                super().__init__(*args, directory=self.web_dir, **kwargs)
+                super().__init__(*args, directory=dashboard.web_dir, **kwargs)
+                
             def log_message(self, format, *args):
                 pass # Suppress logging
+
+            def do_POST(self):
+                if self.path == '/api/command':
+                    content_len = int(self.headers.get('Content-Length', 0))
+                    post_body = self.rfile.read(content_len)
+                    try:
+                        data = json.loads(post_body)
+                        cmd = data.get("command")
+                        
+                        if cmd == "ping":
+                            dashboard.gs.send_kiss_command(0x10)
+                        elif cmd == "status":
+                            dashboard.gs.send_kiss_command(0x20)
+                        elif cmd == "capture":
+                            dashboard.gs.send_kiss_command(0x12)
+                            
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(b'{"status":"ok"}')
+                    except Exception as e:
+                        print(f"   ❌ Web API Error: {e}")
+                        self.send_response(500)
+                        self.end_headers()
+                else:
+                    self.send_error(404)
 
         with TCPServer(("", self.port), Handler) as httpd:
             httpd.serve_forever()
@@ -61,8 +93,22 @@ class GroundStation:
         self.running = True
         
         # Web Dashboard
-        self.dashboard = WebDashboard()
+        self.dashboard = WebDashboard(self)
         self.last_dashboard_update = 0
+        
+        # Dashboard State
+        self.dash_state = {
+            "connection": "OFFLINE",
+            "last_seen": 0,
+            "packet_count": 0,
+            "img_id": 0,
+            "img_progress": 0,
+            "img_size": 0,
+            "vr_status": {
+                "cpu": 0, "temp": 0, "ram": 0, "disk": 0, "uptime": 0, "health": "N/A"
+            },
+            "logs": []
+        }
         
         # Image Transfer State
         self.current_img_data = bytearray()
@@ -83,8 +129,12 @@ class GroundStation:
             self.ser = serial.Serial(self.port, self.baud, timeout=0.1)
             time.sleep(2) # Wait for reset
             print("✅ Connected!")
+            self.dash_state["connection"] = "ONLINE"
+            self.update_json_state()
         except Exception as e:
             print(f"❌ Connection Failed: {e}")
+            self.dash_state["connection"] = "ERROR"
+            self.update_json_state()
             return
 
         # Start background listener thread
@@ -198,6 +248,8 @@ class GroundStation:
         data_content = payload[0:-4] # CMD + PAYLOAD (Excluding CRC)
         received_crc_bytes = payload[-4:]
         
+        self.dash_state["packet_count"] += 1
+        
         # 2. Extract CRC
         received_crc = struct.unpack('<I', received_crc_bytes)[0]
         
@@ -239,11 +291,16 @@ class GroundStation:
             self.start_time = time.time()
             
             # Reset Dashboard
+            self.dash_state["img_id"] = img_id
+            self.dash_state["img_size"] = self.expected_size
+            self.dash_state["img_progress"] = 0
+            
             try:
                 placeholder = os.path.join(self.dashboard.web_dir, "live.jpg")
                 if os.path.exists(placeholder): os.remove(placeholder)
             except: pass
             
+            self.update_json_state()
             return
             
         # CMD 0x21: VR Status Report (Raw Data)
@@ -282,6 +339,17 @@ class GroundStation:
                 else: 
                      print(f"   [RX] VR Status Too Short: {pl_len}")
                      return
+                
+                # Update Dashboard State
+                self.dash_state["vr_status"] = {
+                    "cpu": round(cpu, 1),
+                    "temp": round(temp, 1),
+                    "ram": ram,
+                    "disk": disk,
+                    "uptime": uptime,
+                    "health": throttled_str
+                }
+                self.update_json_state()
 
                 print(f"\n   📊 [VR STATUS DASHBOARD]")
                 print(f"   ----------------------------------")
@@ -318,6 +386,10 @@ class GroundStation:
             
             # Update Dashboard (Throttle: Max 1Hz)
             if time.time() - self.last_dashboard_update > 1.0:
+                # Update Progress
+                if self.expected_size > 0:
+                     self.dash_state["img_progress"] = int((len(self.current_img_data) / self.expected_size) * 100)
+                
                 self.update_dashboard()
                 self.last_dashboard_update = time.time()
                 
@@ -325,8 +397,19 @@ class GroundStation:
 
         print(f"   Rx Unknown CMD: 0x{cmd_byte:02X}")
 
+    def update_json_state(self):
+        """Writes current state to JSON for web UI."""
+        self.dash_state["last_seen"] = time.time()
+        try:
+            path = os.path.join(self.dashboard.web_dir, "status.json")
+            with open(path, "w") as f:
+                json.dump(self.dash_state, f)
+        except: pass
+
     def update_dashboard(self):
         """Attempts to decode partial SSDV data for the dashboard."""
+        self.update_json_state() # Sync JSON
+        
         if not self.current_img_data: return
         
         bin_path = os.path.join(self.dashboard.web_dir, "temp.bin")
@@ -346,6 +429,13 @@ class GroundStation:
     def process_log_line(self, text):
         """Parses ASCII log lines."""
         if not text: return
+        
+        # Add to dashboard logs (keep last 20)
+        timestamp = time.strftime("%H:%M:%S")
+        self.dash_state["logs"].append(f"[{timestamp}] {text}")
+        if len(self.dash_state["logs"]) > 20:
+             self.dash_state["logs"].pop(0)
+        self.update_json_state()
         
         # 1. Detect End of Download
         if "Download Complete!" in text:
