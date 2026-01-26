@@ -5,6 +5,7 @@ import random
 import os
 import subprocess
 import sys
+import zlib
 
 # Add Shared library path (two levels up)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -228,9 +229,19 @@ class RPiVRSimulator:
             if size == 0:
                 print("   ⚠️ Capture failed (or no camera). Sending size 0.")
             
-            # Response: [0x12] [ImgID] [Size]
+            # Request Payload: [ImgID] [Size] [CRC32]
+            file_crc = 0
+            if size > 0 and self.last_captured_file:
+                try:
+                    with open(self.last_captured_file, "rb") as f:
+                        file_data = f.read()
+                        file_crc = zlib.crc32(file_data) & 0xFFFFFFFF
+                except:
+                    pass
+
+            # Response: [0x12] [ImgID] [Size] [FileCRC]
             resp_payload = bytearray([0x12])
-            resp_payload.extend(struct.pack("<HI", self.img_counter, size))
+            resp_payload.extend(struct.pack("<HII", self.img_counter, size, file_crc))
 
         elif cmd_id == 0x13: # Get Image Chunk
             # Request Payload: [ChunkID (2 bytes)]

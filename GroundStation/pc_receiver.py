@@ -4,6 +4,7 @@ import time
 import sys
 import os
 import struct
+import zlib
 
 # Import KISS Protocol
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +41,7 @@ class GroundStation:
         self.current_img_data = bytearray()
         self.received_chunk_ids = set() # Track unique chunks
         self.expected_size = 0
+        self.expected_crc = 0
         self.downloading = False
         self.start_time = 0
         
@@ -194,10 +196,11 @@ class GroundStation:
 
         # CMD 0x12: Capture Response (Start Download)
         if cmd_byte == 0x12:
-            # Payload: [ImgID:2] [Size:4]
-            if len(payload_body) < 6: return
+            # Payload: [ImgID:2] [Size:4] [CRC:4]
+            if len(payload_body) < 10: return
             img_id = struct.unpack('<H', payload_body[0:2])[0]
             self.expected_size = struct.unpack('<I', payload_body[2:6])[0]
+            self.expected_crc = struct.unpack('<I', payload_body[6:10])[0]
             
             sys.stdout.write("\r")
             
@@ -297,6 +300,13 @@ class GroundStation:
                 loss = 100 * (1 - len(self.current_img_data) / self.expected_size)
                 if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
             
+            # Integrity Check
+            calc_crc = zlib.crc32(self.current_img_data) & 0xFFFFFFFF
+            if calc_crc == self.expected_crc:
+                 print(f"   ✅ Integrity Verified (CRC: {calc_crc:08X})")
+            else:
+                 print(f"   ❌ Integrity Mismatch! (Exp {self.expected_crc:08X} != Act {calc_crc:08X})")
+
             self.downloading = False
             sys.stdout.write("GS> ")
             sys.stdout.flush()

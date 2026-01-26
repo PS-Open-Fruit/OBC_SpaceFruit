@@ -56,22 +56,22 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             break;
             
         case VR_CMD_CAPTURE_RES: {
-            // [0x12] [ImgID:2] [Size:4]
+            // [0x12] [ImgID:2] [Size:4] [CRC:4]
             uint32_t img_size;
             memcpy(&img_size, &decoded[3], 4);
             OBC_Log("[VR] Image Captured! Size: %lu bytes. Starting Download...", img_size);
             
             // Forward Start Packet to GS (CMD 0x12)
-            // Payload: [0x12] [ImgID:2] [Size:4]
-            uint8_t gs_payload[16];
-            memcpy(gs_payload, decoded, 7); 
+            // Payload: [0x12] [ImgID:2] [Size:4] [CRC:4]
+            uint8_t gs_payload[20];
+            memcpy(gs_payload, decoded, 11); 
             
             // Append CRC
-            uint32_t crc_gs = OBC_Calculate_CRC(gs_payload, 7);
-            memcpy(&gs_payload[7], &crc_gs, 4);
+            uint32_t crc_gs = OBC_Calculate_CRC(gs_payload, 11);
+            memcpy(&gs_payload[11], &crc_gs, 4);
             
             uint8_t tx_frame_gs[32];
-            uint16_t len_gs = SLIP_Encode(gs_payload, 11, tx_frame_gs);
+            uint16_t len_gs = SLIP_Encode(gs_payload, 15, tx_frame_gs);
             HAL_UART_Transmit(&hlpuart1, tx_frame_gs, len_gs, 100);
 
             vr_state.download_active = 1;
