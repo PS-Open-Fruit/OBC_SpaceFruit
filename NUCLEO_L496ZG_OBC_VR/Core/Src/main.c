@@ -452,9 +452,10 @@ void OBC_Process_Loop(void) {
         
         // Heartbeat LED (Red)
         HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
-        
-        VR_Update();
     }
+    
+    // Run VR Update frequently to handle 20ms LED timing and timeouts
+    VR_Update();
 }
 
 // --- UART Error Callback ---
