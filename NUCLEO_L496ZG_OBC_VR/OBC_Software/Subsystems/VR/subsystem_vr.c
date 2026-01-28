@@ -230,7 +230,7 @@ void VR_Update(void) {
     uint32_t now = HAL_GetTick();
 
     // LED Off Logic
-    if (vr_led_timer > 0 && (now - vr_led_timer > 20)) {
+    if (vr_led_timer > 0 && (now - vr_led_timer > 50)) {
         HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
         vr_led_timer = 0;
     }

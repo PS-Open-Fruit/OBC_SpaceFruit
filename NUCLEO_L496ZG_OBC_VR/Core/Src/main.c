@@ -446,7 +446,7 @@ void OBC_Process_Loop(void) {
     }
 
     // LED Off Logic (Blink effect)
-    if (gs_led_timer > 0 && (HAL_GetTick() - gs_led_timer > 20)) {
+    if (gs_led_timer > 0 && (HAL_GetTick() - gs_led_timer > 50)) {
         HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
         gs_led_timer = 0;
     }
