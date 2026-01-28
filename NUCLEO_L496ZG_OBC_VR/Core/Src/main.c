@@ -346,6 +346,11 @@ PUTCHAR_PROTOTYPE
   /* Place your implementation of fputc here */
   /* e.g. write a character to the USART1 and Loop until the end of transmission */
   HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
+  
+  // Blink GS LED
+  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+  gs_led_timer = HAL_GetTick();
+
   return ch;
 }
 
@@ -374,6 +379,10 @@ void OBC_Log(const char *fmt, ...) {
     uint8_t tx_frame[600];
     uint16_t enc_len = SLIP_Encode(payload, p_idx, tx_frame);
     HAL_UART_Transmit(&hlpuart1, tx_frame, enc_len, 1000);
+
+    // Blink GS LED
+    HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+    gs_led_timer = HAL_GetTick();
 }
 
 
@@ -406,10 +415,6 @@ void OBC_Process_Loop(void) {
              memcpy(&rx_crc, &decoded_gs[dec_len-4], 4);
              
              uint32_t calc_crc = OBC_Calculate_CRC(decoded_gs, dec_len-4);
-             // Blink GS LED (LD1 Green)
-             HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-             gs_led_timer = HAL_GetTick();
-
              
              if (calc_crc == rx_crc) gs_crc_ok = 1;
              else OBC_Log("[OBC] GS CRC Fail: Rx %08X vs Calc %08X", rx_crc, calc_crc);

@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 extern UART_HandleTypeDef hlpuart1; // Need access to send data to GS
+extern uint32_t gs_led_timer; // GS LED Timer from main.c
 
 VR_State_t vr_state;
 uint32_t vr_led_timer = 0;
@@ -83,6 +84,10 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             uint16_t len_gs = SLIP_Encode(gs_payload, 15, tx_frame_gs);
             HAL_UART_Transmit(&hlpuart1, tx_frame_gs, len_gs, 100);
 
+            // Blink GS LED
+            HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+            gs_led_timer = HAL_GetTick();
+
             vr_state.download_active = 1;
             vr_state.next_chunk_to_req = 0;
 
@@ -120,6 +125,10 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             uint8_t tx_frame_gs[128];
             uint16_t len_gs = SLIP_Encode(gs_payload, 1 + data_len + 4, tx_frame_gs);
             HAL_UART_Transmit(&hlpuart1, tx_frame_gs, len_gs, 100);
+
+            // Blink GS LED
+            HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+            gs_led_timer = HAL_GetTick();
             
             // Blink debug LED
             HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
@@ -162,6 +171,10 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
                  uint16_t kiss_len = SLIP_Encode(payload_buffer, current_payload_len, kiss_tx_buffer);
                  
                  HAL_UART_Transmit(&hlpuart1, kiss_tx_buffer, kiss_len, 2000);
+
+                 // Blink GS LED
+                 HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+                 gs_led_timer = HAL_GetTick();
                  
                  vr_state.next_chunk_to_req++;
                  
