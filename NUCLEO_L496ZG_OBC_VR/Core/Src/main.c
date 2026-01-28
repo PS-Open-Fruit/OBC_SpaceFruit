@@ -71,6 +71,8 @@ uint8_t gs_isr_idx = 0;
 uint8_t gs_app_buffer[MAX_FRAME_SIZE];
 uint16_t gs_app_len = 0;
 volatile uint8_t is_gs_frame_ready = 0;
+// --- LED Timers ---
+uint32_t gs_led_timer = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -296,6 +298,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
@@ -321,6 +326,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LD1_Pin */
+  GPIO_InitStruct.Pin = LD1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LD1_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -394,6 +406,10 @@ void OBC_Process_Loop(void) {
              memcpy(&rx_crc, &decoded_gs[dec_len-4], 4);
              
              uint32_t calc_crc = OBC_Calculate_CRC(decoded_gs, dec_len-4);
+             // Blink GS LED (LD1 Green)
+             HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+             gs_led_timer = HAL_GetTick();
+
              
              if (calc_crc == rx_crc) gs_crc_ok = 1;
              else OBC_Log("[OBC] GS CRC Fail: Rx %08X vs Calc %08X", rx_crc, calc_crc);
@@ -411,7 +427,7 @@ void OBC_Process_Loop(void) {
              }
              else if (cmd_id == 0x10) { 
                  OBC_Log("[OBC] GS CMD: Ping!");
-                 if (VR_IsOnline()) VR_SendCmd(VR_CMD_PING);
+                 if (VR_IsOnline()) VR_RequestGSPing();
                  else OBC_Log("[OBC] VR Offline! Pong failed.");
              }
              else if (cmd_id == 0x20) { 
@@ -420,7 +436,14 @@ void OBC_Process_Loop(void) {
                  else OBC_Log("[OBC] VR Offline! No Status.");
              }
         }
+    
         is_gs_frame_ready = 0;
+    }
+
+    // LED Off Logic (Blink effect)
+    if (gs_led_timer > 0 && (HAL_GetTick() - gs_led_timer > 20)) {
+        HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+        gs_led_timer = 0;
     }
 
     // 2. Periodic Tasks

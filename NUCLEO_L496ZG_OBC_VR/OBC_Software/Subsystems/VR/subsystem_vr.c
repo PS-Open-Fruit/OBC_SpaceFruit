@@ -7,12 +7,14 @@
 extern UART_HandleTypeDef hlpuart1; // Need access to send data to GS
 
 VR_State_t vr_state;
+uint32_t vr_led_timer = 0;
 
 void VR_Init(void) {
     vr_state.download_active = 0;
     vr_state.next_chunk_to_req = 0;
     vr_state.last_seen_tick = 0;
     vr_state.is_online = 0;
+    vr_state.gs_ping_pending = 0;
 }
 
 // Helper to Log via GS Link (duplicated from main.c for now, can be centralized later)
@@ -52,7 +54,14 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             if (!was_online) {
                 OBC_Log("[VR] Connection Restored!");
             }
-            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+            HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET); // Blink On
+            vr_led_timer = HAL_GetTick();
+            
+            // Only log Pong if GS requested it
+            if (vr_state.gs_ping_pending) {
+                OBC_Log("[VR] Pong!");
+                vr_state.gs_ping_pending = 0;
+            }
             break;
             
         case VR_CMD_CAPTURE_RES: {
@@ -112,8 +121,9 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             uint16_t len_gs = SLIP_Encode(gs_payload, 1 + data_len + 4, tx_frame_gs);
             HAL_UART_Transmit(&hlpuart1, tx_frame_gs, len_gs, 100);
             
-            // Optional: Blink debug LED
-            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+            // Blink debug LED
+            HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+            vr_led_timer = HAL_GetTick();
             break;
         }
 
@@ -127,7 +137,8 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             uint8_t* raw_data = &decoded[3];
             
             if (chunk_id == vr_state.next_chunk_to_req) {
-                 HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                 HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET); // Blink On
+                 vr_led_timer = HAL_GetTick();
 
                  // Forward to GS
                  // We need to reconstruct the KISS Frame manually here because SLIP_Encode is generic
@@ -197,8 +208,19 @@ void VR_SendCmd(uint8_t cmd_id) {
     CDC_Transmit_FS(tx_frame, len);
 }
 
+void VR_RequestGSPing(void) {
+    vr_state.gs_ping_pending = 1;
+    VR_SendCmd(VR_CMD_PING);
+}
+
 void VR_Update(void) {
     uint32_t now = HAL_GetTick();
+
+    // LED Off Logic
+    if (vr_led_timer > 0 && (now - vr_led_timer > 20)) {
+        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+        vr_led_timer = 0;
+    }
 
     // Check Timeout
     if (vr_state.is_online && (now - vr_state.last_seen_tick > VR_TIMEOUT_MS)) {
@@ -212,7 +234,7 @@ void VR_Update(void) {
         last_ping = now;
         VR_SendCmd(VR_CMD_PING);
     }
-    
+
     // Chunk Retry Mechanism (Every 500ms if stuck)
     if (vr_state.download_active && vr_state.is_online) {
         if (now - vr_state.last_chunk_req_tick > 500) {
