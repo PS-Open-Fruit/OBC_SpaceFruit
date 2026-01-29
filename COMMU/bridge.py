@@ -14,9 +14,10 @@ except ImportError:
     sys.exit(1)
 
 # --- CONFIGURATION ---
-PORT_RF  = '/dev/ttyACM0'  # RF433 Module
+# Using /dev/serial/by-id/ ensures we connect to the correct device even if ports swap
+PORT_RF  = '/dev/serial/by-id/usb-Arduino_LLC_Arduino_Leonardo-if00'  # RF433 Module
 BAUD_RF  = 9600
-PORT_OBC = '/dev/ttyACM1'  # STM32 Nucleo
+PORT_OBC = '/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066BFF485251667187013558-if01'  # STM32 Nucleo
 BAUD_OBC = 9600
 
 class KissDecoder:
