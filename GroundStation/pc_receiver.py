@@ -25,7 +25,7 @@ except ImportError:
 # ==========================================
 # 1. Config
 # ==========================================
-PC_PORT = 'COM7'  # Update if needed
+PC_PORT = 'COM9'  # Update if needed
 BAUDRATE = 9600   # PRODUCTION BAUDRATE
 DOWNLOAD_DIR = "received_images"
 
@@ -159,7 +159,7 @@ class GroundStation:
                     req = struct.pack('<H', chunk_id)
                     # Use send_kiss_command which now accepts data
                     # Avoid print spam
-                    self.send_kiss_command(0x13, req) 
+                    self.send_kiss_command(0x13, req, verbose=False) 
                 except Exception as e:
                     print(f"Error sending request: {e}")
 
@@ -205,7 +205,7 @@ class GroundStation:
         # Start main CLI loop
         self.cli_loop()
 
-    def send_kiss_command(self, cmd_id, data=b''):
+    def send_kiss_command(self, cmd_id, data=b'', verbose=True):
         """Sends a KISS-framed command to the OBC with CRC32."""
         if not self.ser or not self.ser.is_open: 
             print("❌ Serial Closed")
@@ -228,10 +228,11 @@ class GroundStation:
         frame = KISSProtocol.wrap_frame(full_payload, KISSProtocol.CMD_DATA)
         
         self.ser.write(frame)
-        if len(data) == 0:
-            print(f"   [TX] Sent CMD: 0x{cmd_id:02X} (CRC: {crc:08X})")
-        else:
-            print(f"   [TX] Sent CMD: 0x{cmd_id:02X} Len:{len(data)} (CRC: {crc:08X})")
+        if verbose:
+            if len(data) == 0:
+                print(f"   [TX] Sent CMD: 0x{cmd_id:02X} (CRC: {crc:08X})")
+            else:
+                print(f"   [TX] Sent CMD: 0x{cmd_id:02X} Len:{len(data)} (CRC: {crc:08X})")
 
     def cli_loop(self):
         """Interactive Command Line Interface."""
@@ -568,9 +569,14 @@ class GroundStation:
         
         if self.expected_size > 0:
             pct = (current_len / self.expected_size) * 100.0
-            # Simple condensed output to not break CLI input too much
-            sys.stdout.write(f"\r   Downloading: {pct:.1f}% | {current_len/1024:.1f} KB | {speed:.1f} KB/s")
-            sys.stdout.flush()
+            
+            # Progress Bar [=======>....]
+            bar_len = 10
+            filled = int(bar_len * current_len // self.expected_size)
+            bar = '█' * filled + '-' * (bar_len - filled)
+            
+            output = f"   Downloading: [{bar}] {pct:.1f}% | {current_len/1024:.1f} KB | {speed:.1f} KB/s   "
+            print(f"\r{output}", end='', flush=True)
 
 if __name__ == "__main__":
     gs = GroundStation(PC_PORT, BAUDRATE)
