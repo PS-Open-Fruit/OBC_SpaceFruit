@@ -38,16 +38,24 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
     memcpy(&rx_crc, &decoded[dec_len-4], 4);
     
     // Calc CRC
+    // decoded[0] is now KISS Command (usually 0x00)
+    // Application Command is at decoded[1]
     uint32_t calc_crc = OBC_Calculate_CRC(decoded, dec_len-4);
-    uint8_t cmd_id = decoded[0];
+    uint8_t kiss_cmd = decoded[0];
+    uint8_t cmd_id = decoded[1]; // Shifted due to SLIP_Decode change
     
     if (calc_crc != rx_crc) {
         if (cmd_id == VR_CMD_CHUNK_RES) {
-             OBC_Log("[VR] CRC Fail on Img Chunk %02X! Forwarding for SSDV fix...", decoded[1]);
+             OBC_Log("[VR] CRC Fail on Img Chunk %02X! Forwarding for SSDV fix...", decoded[2]);
         } else {
              OBC_Log("[VR] CRC Fail: %08X vs %08X (Cmd: %02X). Dropped.", rx_crc, calc_crc, cmd_id);
              return;
         }
+    }
+    
+    // Only process if it's a Data Frame
+    if (kiss_cmd != 0x00) {
+        return;
     }
 
     switch (cmd_id) {
@@ -67,14 +75,18 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             
         case VR_CMD_CAPTURE_RES: {
             // [0x12] [ImgID:2] [Size:4] [CRC:4]
+            // decoded map: 0:KISS, 1:CMD, 2:ID, 4:Size
             uint32_t img_size;
-            memcpy(&img_size, &decoded[3], 4);
+            memcpy(&img_size, &decoded[4], 4);
             OBC_Log("[VR] Image Captured! Size: %lu bytes. Starting Download...", img_size);
             
             // Forward Start Packet to GS (CMD 0x12)
-            // Payload: [0x12] [ImgID:2] [Size:4] [CRC:4]
+            // Header is already processed, we want to construct GS packet:
+            // [0x12] [ImgID] [Size] ...
+            // decoded[2] is ID start. Copy 10 bytes (ID:2 + Size:4 + CRC:4)
             uint8_t gs_payload[20];
-            memcpy(gs_payload, decoded, 11); 
+            gs_payload[0] = 0x12;
+            memcpy(&gs_payload[1], &decoded[2], 10); 
             
             // Append CRC
             uint32_t crc_gs = OBC_Calculate_CRC(gs_payload, 11);
@@ -112,11 +124,11 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
             if (dec_len < 5) return;
 
             // We include the RPi's CRC in the forwarded packet for transparency
-            uint16_t data_len = dec_len - 1; // Exclude RPi CMD 0x11
+            uint16_t data_len = (dec_len >= 6) ? (dec_len - 6) : 0; // Exclude KISS(1)+VRCMD(1)+CRC(4)
             
             uint8_t gs_payload[64];
             gs_payload[0] = 0x21; // GS VR Status Report CMD
-            memcpy(&gs_payload[1], &decoded[1], data_len);
+            memcpy(&gs_payload[1], &decoded[2], data_len);
             
             // Append GS CRC
             uint32_t crc_gs = OBC_Calculate_CRC(gs_payload, 1 + data_len);
@@ -138,12 +150,13 @@ void VR_Handle_Packet(uint8_t* decoded, uint16_t dec_len) {
 
         case VR_CMD_CHUNK_RES: {
             // [0x13] [ChunkID:2] [Data... (N)] [CRC:4]
+            // decoded map: 0:KISS, 1:CMD, 2:ID_L, 3:ID_H, 4..:DATA
             
             uint16_t chunk_id;
-            memcpy(&chunk_id, &decoded[1], 2);
+            memcpy(&chunk_id, &decoded[2], 2);
             
-            uint16_t data_len = (dec_len >= 7) ? (dec_len - 7) : 0;
-            uint8_t* raw_data = &decoded[3];
+            uint16_t data_len = (dec_len >= 8) ? (dec_len - 8) : 0;
+            uint8_t* raw_data = &decoded[4];
             
             if (chunk_id == vr_state.next_chunk_to_req) {
                  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET); // Blink On

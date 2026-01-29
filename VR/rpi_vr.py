@@ -346,8 +346,9 @@ class RPiVRSimulator:
 
         # Send Response (with CRC)
         if resp_payload:
-            # 1. Calc CRC (Exclude KISS CMD 0x00 because main.c SLIP_Decode strips it from check)
-            crc = KISSProtocol.calculate_crc(resp_payload)
+            # 1. Calc CRC (Protocol: CRC Includes KISS CMD [0x00] + [PAYLOAD])
+            data_to_crc = bytearray([KISSProtocol.CMD_DATA]) + resp_payload
+            crc = KISSProtocol.calculate_crc(data_to_crc)
             
             # 2. Append CRC
             full_payload = bytearray(resp_payload)

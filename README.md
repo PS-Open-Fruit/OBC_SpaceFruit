@@ -47,6 +47,26 @@ The communication stack is standardized across both links (GS-OBC and OBC-Payloa
 ### Packet Structure
 `[FEND] [CMD_TYPE] [PAYLOAD_ID] [DATA...] [CRC32] [FEND]`
 
+### KISS Framing Details
+The system uses the KISS protocol (similar to SLIP) to ensure data transparency on the serial link:
+
+*   **FEND (`0xC0`)**: Frame End byte. Marks the start and end of every packet.
+*   **Escaping Mechanism**:
+    *   If data contains `0xC0` $\to$ it is sent as `0xDB 0xDC`.
+    *   If data contains `0xDB` $\to$ it is sent as `0xDB 0xDD`.
+*   **Command Byte**: The first byte after `FEND` (`[CMD_TYPE]`) defines the frame content:
+    *   `0x00`: Data Frame (Commands, Image Chunks)
+    *   `0x01`: Text Log Message
+    *   `0x12`, `0x21`: Custom Status Responses
+
+### CRC Integrity Check
+A 32-bit Cyclic Redundancy Check (CRC32) is appended to every packet to ensure data integrity.
+*   **Algorithm**: Standard CRC-32 (IEEE 802.3/Zlib).
+*   **Placement**: Last 4 bytes of the payload (Little Endian).
+*   **Calculation Scope**:
+    *   **Uplink (PC -> OBC)**: Calculated on **[KISS Command Byte] + [Payload data]**.
+    *   **Downlink (OBC -> PC)**: Calculated on **[KISS Command Byte] + [Payload data]**.
+
 ## Project Structure
 
 *   `GroundStation/`: Python tools for the PC operator.

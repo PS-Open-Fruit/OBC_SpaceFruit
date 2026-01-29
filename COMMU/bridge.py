@@ -76,12 +76,30 @@ class KissDecoder:
             
             crc_calc = KISSProtocol.calculate_crc(data_to_check)
             
-            crc_status = "✅ OK" if crc_rx == crc_calc else f"❌ BAD (Calc {crc_calc:08X})"
+            if crc_rx == crc_calc:
+                crc_status = "✅ OK"
+            else:
+                crc_status = f"❌ BAD (Calc {crc_calc:08X})"
 
             # Identify Content
             info = ""
-            if cmd_byte == 0x10:
-                info = "COMMAND: PING"
+            
+            if cmd_byte == 0x00: # Data Frame
+                # Inspect the first byte of data to guess the Application Command
+                if len(data_content) > 0:
+                    app_cmd = data_content[0]
+                    if app_cmd == 0x10:
+                        info = "COMMAND: PING"
+                    elif app_cmd == 0x12:
+                        info = "COMMAND: CAPTURE"
+                    elif app_cmd == 0x20:
+                        info = "COMMAND: STATUS"
+                    else:
+                        clean_ascii = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in data_content)
+                        info = f"DATA: {clean_ascii}"
+                else:
+                    info = "DATA: (Empty)"
+                    
             elif cmd_byte == 0x01: # Log Message
                 try:
                     info = f"LOG: {data_content.decode('utf-8', errors='ignore')}"

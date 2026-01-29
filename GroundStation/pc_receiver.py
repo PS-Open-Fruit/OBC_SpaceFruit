@@ -25,7 +25,7 @@ except ImportError:
 # ==========================================
 # 1. Config
 # ==========================================
-PC_PORT = 'COM9'  # Update if needed
+PC_PORT = 'COM7'  # Update if needed
 BAUDRATE = 9600   # PRODUCTION BAUDRATE
 DOWNLOAD_DIR = "received_images"
 
@@ -153,8 +153,10 @@ class GroundStation:
         # Construct Payload: [APP_CMD]
         app_payload = bytes([cmd_id])
         
-        # Calculate CRC over Payload
-        crc = KISSProtocol.calculate_crc(app_payload)
+        # Calculate CRC over [KISS_CMD_DATA] + [APP_PAYLOAD]
+        # This matches OBC behavior (Symmetry)
+        data_to_crc = bytes([KISSProtocol.CMD_DATA]) + app_payload
+        crc = KISSProtocol.calculate_crc(data_to_crc)
         crc_bytes = struct.pack('<I', crc)
         
         # Full Payload: [APP_CMD] [CRC]
@@ -253,8 +255,8 @@ class GroundStation:
         # 2. Extract CRC
         received_crc = struct.unpack('<I', received_crc_bytes)[0]
         
-        # 3. Calculate CRC (Over CMD + PAYLOAD)
-        calc_crc = KISSProtocol.calculate_crc(data_content)
+        data_to_check = data_content
+        calc_crc = KISSProtocol.calculate_crc(data_to_check)
         
         if calc_crc != received_crc:
             if cmd_byte == 0x13: # Img Chunk
@@ -264,10 +266,9 @@ class GroundStation:
                 print(f"\n⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
                 return
 
-        # 4. Dispatch
-        payload_body = data_content[1:] # Exclude CMD
-
-        # CMD 0x01: Log Message
+        payload_body = data_content[1:] # Strip KISS Command Byte from payload body
+        
+        # If KISS CMD is 0x01 (Log), the payload body IS the text
         if cmd_byte == 0x01:
              text = payload_body.decode('utf-8', errors='replace')
              self.process_log_line(text)

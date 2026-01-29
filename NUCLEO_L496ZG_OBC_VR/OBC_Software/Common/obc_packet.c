@@ -44,13 +44,11 @@ uint16_t SLIP_Decode(uint8_t* frame, uint16_t len, uint8_t* out_payload) {
     if (len < 3) return 0;
     if (frame[0] != FEND || frame[len-1] != FEND) return 0;
 
-    // Check KISS Data Command (0x00)
-    // The protocol wraps payloads in KISS frames: [FEND] [0x00] [PAYLOAD] [FEND]
-    // We skip the first FEND and the 0x00 command byte.
-    if (frame[1] != 0x00) return 0; 
+    // We decode everything between the FENDs, including the KISS Command Byte (frame[1])
+    // This allows the CRC check to cover [CMD] + [PAYLOAD] correctly.
     
     uint16_t out_idx = 0;
-    uint16_t start_idx = 2; // Skip FEND and KISS Command byte
+    uint16_t start_idx = 1; // Skip only the Start FEND
     
     uint16_t out_i = 0;
     for (uint16_t i = start_idx; i < len - 1; i++) {

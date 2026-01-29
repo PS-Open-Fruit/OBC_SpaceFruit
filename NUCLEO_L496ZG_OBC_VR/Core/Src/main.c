@@ -411,6 +411,7 @@ void OBC_Process_Loop(void) {
         // Validate CRC (GS -> OBC)
         uint8_t gs_crc_ok = 0;
         if (dec_len >= 5) {
+            //  [KISS_CMD] + [CRC:4] = 5 bytes (Empty payload)
              uint32_t rx_crc;
              memcpy(&rx_crc, &decoded_gs[dec_len-4], 4);
              
@@ -423,22 +424,26 @@ void OBC_Process_Loop(void) {
         }
 
         if (gs_crc_ok) {
-             uint8_t cmd_id = decoded_gs[0];
+             // Index 0 is KISS CMD (should be 0x00), Index 1 is APP CMD
+             uint8_t kiss_cmd = decoded_gs[0];
+             uint8_t cmd_id = decoded_gs[1];
              
-             if (cmd_id == 0x12) { 
-                 OBC_Log("[OBC] GS CMD: Capture!");
-                 if (VR_IsOnline()) VR_SendCmd(VR_CMD_CAPTURE_RES);
-                 else OBC_Log("[OBC] VR Offline! Cannot Capture.");
-             }
-             else if (cmd_id == 0x10) { 
-                 OBC_Log("[OBC] GS CMD: Ping!");
-                 if (VR_IsOnline()) VR_RequestGSPing();
-                 else OBC_Log("[OBC] VR Offline! Pong failed.");
-             }
-             else if (cmd_id == 0x20) { 
-                 OBC_Log("[OBC] GS CMD: Status Req!");
-                 if (VR_IsOnline()) VR_SendCmd(VR_CMD_STATUS_RES); 
-                 else OBC_Log("[OBC] VR Offline! No Status.");
+             if (kiss_cmd == 0x00) {
+                 if (cmd_id == 0x12) { 
+                     OBC_Log("[OBC] GS CMD: Capture!");
+                     if (VR_IsOnline()) VR_SendCmd(VR_CMD_CAPTURE_RES);
+                     else OBC_Log("[OBC] VR Offline! Cannot Capture.");
+                 }
+                 else if (cmd_id == 0x10) { 
+                     OBC_Log("[OBC] GS CMD: Ping!");
+                     if (VR_IsOnline()) VR_RequestGSPing();
+                     else OBC_Log("[OBC] VR Offline! Pong failed.");
+                 }
+                 else if (cmd_id == 0x20) { 
+                     OBC_Log("[OBC] GS CMD: Status Req!");
+                     if (VR_IsOnline()) VR_SendCmd(VR_CMD_STATUS_RES); 
+                     else OBC_Log("[OBC] VR Offline! No Status.");
+                 }
              }
         }
     
