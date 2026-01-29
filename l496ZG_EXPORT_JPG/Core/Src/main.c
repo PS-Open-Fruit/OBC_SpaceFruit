@@ -23,7 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,7 +57,9 @@ static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void SD_ListFiles(void);
+void SD_SendFile(char *filename);
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -98,6 +101,12 @@ int main(void)
   MX_FATFS_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  // HAL_Delay(1000); // Wait for system to settle
+  // SD_ListFiles();
+
+  // Send specific file
+  printf("Sending file: 01261311.JPG...\r\n");
+  SD_SendFile("01261311.JPG");
 
   /* USER CODE END 2 */
 
@@ -188,8 +197,8 @@ static void MX_LPUART1_UART_Init(void)
 
   /* USER CODE END LPUART1_Init 1 */
   hlpuart1.Instance = LPUART1;
-  hlpuart1.Init.BaudRate = 209700;
-  hlpuart1.Init.WordLength = UART_WORDLENGTH_7B;
+  hlpuart1.Init.BaudRate = 9600;
+  hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
   hlpuart1.Init.StopBits = UART_STOPBITS_1;
   hlpuart1.Init.Parity = UART_PARITY_NONE;
   hlpuart1.Init.Mode = UART_MODE_TX_RX;
@@ -316,6 +325,14 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+PUTCHAR_PROTOTYPE
+{
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the USART1 and Loop until the end of transmission */
+  HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
+
+  return ch;
+}
 /* USER CODE END 4 */
 
 /**
