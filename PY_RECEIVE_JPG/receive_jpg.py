@@ -3,10 +3,11 @@ import time
 import base64
 import os
 import sys
+import zlib
 
 # Configuration matches STM32 LPUART1
 PORT = "COM5"
-BAUDRATE = 9600 # Updated to match STM32 configuration
+BAUDRATE = 209700 # Updated to match STM32 configuration
 OUTPUT_DIR = "received_images"
 
 def main():
@@ -27,14 +28,15 @@ def main():
     
     print("Waiting for data...")
     
-    current_file_name = None
-    current_file_data = [] # List of base64 chunks
     receiving = False
+    f_out = None
+    crc_calculated = 0
+    crc_received = None
+    save_path = ""
 
     try:
         total_size = 0
         current_bytes_written = 0
-        f_out = None
         start_time = 0
 
         while True:
@@ -61,13 +63,24 @@ def main():
                         save_name = "receive_jpg.jpg"
                         print(f"\n[RX] Start Receiving: {original_filename} -> {save_name} (Size: {total_size})")
                         
-                        path = os.path.join(OUTPUT_DIR, save_name)
-                        f_out = open(path, "wb")
+                        save_path = os.path.join(OUTPUT_DIR, save_name)
+                        f_out = open(save_path, "wb")
                         
                         current_bytes_written = 0
+                        crc_calculated = 0 # Initial CRC value
+                        crc_received = None # Reset received CRC
                         start_time = time.time()
                         receiving = True
                 
+                elif line.startswith("CHECKSUM:"):
+                     # Format: CHECKSUM:0xABC12345
+                     try:
+                         val_str = line.split(":")[1]
+                         crc_received = int(val_str, 16)
+                         print(f"\n[RX] Received Checksum: 0x{crc_received:08X}")
+                     except:
+                         print("\n[RX] Warning: Could not parse checksum")
+
                 elif line == "EXPORT_COMPLETE":
                     if receiving and f_out:
                         f_out.close()
@@ -83,11 +96,21 @@ def main():
                             print(f"Time: {duration:.2f} s")
                             print(f"Speed: {speed:.2f} KB/s")
                         
+                        # Verify Size
                         if total_size > 0 and current_bytes_written < total_size:
                              print(f"Warning: Lost {total_size - current_bytes_written} bytes ({100 - (current_bytes_written/total_size)*100:.1f}%) during transfer.")
-                    
+                        
+                        # Verify CRC
+                        print(f"Calculated CRC (zlib): 0x{crc_calculated:08X}")
+                        
+                        if crc_received is not None:
+                            if crc_received == crc_calculated:
+                                print("CRC CHECK: PASS (Standard zlib match)")
+                            else:
+                                print(f"CRC CHECK: FAIL (Expected: 0x{crc_received:08X}, Got: 0x{crc_calculated:08X})")
+                                print("Note: Mismatch might be due to CRC variant differences (Reflected vs Non-reflected).")
+                                
                     receiving = False
-                    current_file_name = None
                 
                 elif receiving:
                     # Decode Line Immediately
@@ -97,6 +120,9 @@ def main():
                         f_out.write(chunk_data)
                         current_bytes_written += len(chunk_data)
                         
+                        # Update CRC
+                        crc_calculated = zlib.crc32(chunk_data, crc_calculated)
+
                         # UI Update
                         if total_size > 0:
                              pct = (current_bytes_written / total_size) * 100
@@ -106,7 +132,6 @@ def main():
                                  
                     except Exception as e:
                         # If a single line is corrupted, we skip it but keep the file open
-                        # This prevents one bad line from killing the whole image
                         pass
             else:
                  # Only sleep if no data waiting, to maximize throughput
