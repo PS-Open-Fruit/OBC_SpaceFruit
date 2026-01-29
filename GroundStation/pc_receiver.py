@@ -123,6 +123,67 @@ class GroundStation:
         self.kiss_buffer = bytearray()
         self.in_frame = False
 
+    def start_download_worker(self):
+        """Starts the background downloader thread."""
+        if hasattr(self, 'worker_thread') and self.worker_thread.is_alive() and self.downloading:
+             print("   [FLOW] Download worker already active.")
+             return
+
+        self.worker_thread = threading.Thread(target=self._download_loop, daemon=True)
+        self.worker_thread.start()
+
+    def _download_loop(self):
+        """Stop-and-Wait ARQ for Image Download"""
+        CHUNK_SIZE = 200
+        if self.expected_size == 0: return
+
+        total_chunks = (self.expected_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+        print(f"   [FLOW] Starting Download Loop: {total_chunks} Chunks")
+
+        for chunk_id in range(total_chunks):
+            if not self.downloading: 
+                print("   [FLOW] Download Cancelled")
+                return
+
+            # Skip if we already got it (e.g. from previous attempt or duplicate)
+            if chunk_id in self.received_chunk_ids:
+                continue
+
+            success = False
+            retries = 0
+            MAX_RETRIES = 10 
+            
+            while not success and retries < MAX_RETRIES and self.downloading:
+                # Send Request: 0x13 + [ChunkID:2]
+                try:
+                    req = struct.pack('<H', chunk_id)
+                    # Use send_kiss_command which now accepts data
+                    # Avoid print spam
+                    self.send_kiss_command(0x13, req) 
+                except Exception as e:
+                    print(f"Error sending request: {e}")
+
+                # Wait for Response
+                timeout = 2.0 # Adjust based on RF conditions
+                start_wait = time.time()
+                while time.time() - start_wait < timeout:
+                    if chunk_id in self.received_chunk_ids:
+                        success = True
+                        break
+                    time.sleep(0.01)
+                
+                if not success:
+                    print(f"   ⚠️ Timeout Chunk {chunk_id}, Retrying ({retries+1}/{MAX_RETRIES})...")
+                    retries += 1
+            
+            if not success:
+                print("   ❌ Max Retries Exceeded. Aborting.")
+                self.downloading = False
+                return
+            
+            # Small inter-frame delay to prevent flooding RF TX buffer
+            time.sleep(0.05)
+
     def start(self):
         print(f"Connecting to {self.port} at {self.baud} baud...")
         try:
@@ -144,14 +205,14 @@ class GroundStation:
         # Start main CLI loop
         self.cli_loop()
 
-    def send_kiss_command(self, cmd_id):
+    def send_kiss_command(self, cmd_id, data=b''):
         """Sends a KISS-framed command to the OBC with CRC32."""
         if not self.ser or not self.ser.is_open: 
             print("❌ Serial Closed")
             return
         
-        # Construct Payload: [APP_CMD]
-        app_payload = bytes([cmd_id])
+        # Construct Payload: [APP_CMD] + [DATA]
+        app_payload = bytes([cmd_id]) + data
         
         # Calculate CRC over [KISS_CMD_DATA] + [APP_PAYLOAD]
         # This matches OBC behavior (Symmetry)
@@ -159,15 +220,18 @@ class GroundStation:
         crc = KISSProtocol.calculate_crc(data_to_crc)
         crc_bytes = struct.pack('<I', crc)
         
-        # Full Payload: [APP_CMD] [CRC]
+        # Full Payload: [APP_CMD] [DATA] [CRC]
         full_payload = app_payload + crc_bytes
         
         # Wrap in KISS Data Frame (CMD 0x00)
-        # Wire: [FEND] [0x00] [APP_CMD] [CRC] [FEND]
+        # Wire: [FEND] [0x00] [APP_CMD] [DATA] [CRC] [FEND]
         frame = KISSProtocol.wrap_frame(full_payload, KISSProtocol.CMD_DATA)
         
         self.ser.write(frame)
-        print(f"   [TX] Sent CMD: 0x{cmd_id:02X} (CRC: {crc:08X})")
+        if len(data) == 0:
+            print(f"   [TX] Sent CMD: 0x{cmd_id:02X} (CRC: {crc:08X})")
+        else:
+            print(f"   [TX] Sent CMD: 0x{cmd_id:02X} Len:{len(data)} (CRC: {crc:08X})")
 
     def cli_loop(self):
         """Interactive Command Line Interface."""
@@ -302,6 +366,7 @@ class GroundStation:
             except: pass
             
             self.update_json_state()
+            self.start_download_worker() # Start the flow control worker
             return
             
         # CMD 0x21: VR Status Report (Raw Data)
@@ -369,12 +434,12 @@ class GroundStation:
 
             return
 
-        # CMD 0x00: Image Data (Space Ready Format)
-        if cmd_byte == 0x00:
+        # CMD 0x13: Image Data (Chunk Response) or 0x00 (Data)
+        if cmd_byte == 0x13 or cmd_byte == 0x00:
             if len(payload_body) < 2: return # Need ChunkID
             
             # ChunkID (2 bytes)
-            chunk_id = payload_body[0] | (payload_body[1] << 8)
+            chunk_id = struct.unpack('<H', payload_body[0:2])[0]
             img_chunk = payload_body[2:]
             
             # Deduplication Check

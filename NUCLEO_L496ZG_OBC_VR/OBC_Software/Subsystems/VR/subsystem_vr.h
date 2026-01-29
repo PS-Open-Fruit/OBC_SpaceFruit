@@ -25,6 +25,7 @@ typedef struct {
 void VR_Init(void);
 void VR_Handle_Packet(uint8_t* payload, uint16_t len);
 void VR_SendCmd(uint8_t cmd_id);
+void VR_SendChunkReq(uint16_t chunk_id);
 void VR_RequestGSPing(void);
 void VR_Update(void);
 uint8_t VR_IsOnline(void);

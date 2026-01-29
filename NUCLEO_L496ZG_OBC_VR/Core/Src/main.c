@@ -444,6 +444,19 @@ void OBC_Process_Loop(void) {
                      if (VR_IsOnline()) VR_SendCmd(VR_CMD_STATUS_RES); 
                      else OBC_Log("[OBC] VR Offline! No Status.");
                  }
+                 else if (cmd_id == 0x13) {
+                     // Get Chunk ID from payload (2 bytes)
+                     // Packet: [CMD:1] [ID_L] [ID_H]
+                     if (dec_len >= 4) { // CMD + 2 + CRC (implied valid if we are here, payload is dec_len - 4)
+                         uint16_t payload_len = dec_len - 4; // Excluding CRC
+                         // payload: [KISS] [APP] [DATA...]
+                         if (payload_len >= 4) { // Needs [KISS] [APP] [ID_L] [ID_H]
+                             uint16_t req_id = decoded_gs[2] | (decoded_gs[3] << 8);
+                             // NO LOGGING to avoid flooding the bridge
+                             if (VR_IsOnline()) VR_SendChunkReq(req_id);
+                         }
+                     }
+                 }
              }
         }
     
