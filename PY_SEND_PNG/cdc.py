@@ -10,7 +10,8 @@ from datetime import datetime
 BAUDRATE = 115200 
 TIMEOUT = 2
 CHUNK_SIZE = 4096 # Send in 4KB chunks
-TARGET_FILE = 'Panorama_of_3mb.jpg'
+script_dir = os.path.dirname(os.path.abspath(__file__))
+TARGET_FILE = os.path.join(script_dir, 'Panorama_of_3mb.jpg')
 
 def list_serial_ports():
     ports = serial.tools.list_ports.comports()
@@ -118,7 +119,7 @@ def send_file(serial_port, file_path):
 
 
 def main():
-    # 1. Port Selection (Hardcoded to COM7)
+    # 1. Port Selection (Hardcoded to COM)
     selected_port = 'COM3'
     print(f"Using Port: {selected_port}")
     print(f"\nTarget File: {TARGET_FILE}")
@@ -153,8 +154,8 @@ def main():
                 f.write(f"{timestamp},Error,{str(e)}\n")
 
         # Wait 20 seconds
-        print("\nWaiting 20 seconds before next transfer...")
-        time.sleep(20)
+        print("\nWaiting 5 seconds before next transfer...")
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()

@@ -25,6 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include "../../Sd_SPI/sd_save.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,18 +49,6 @@ UART_HandleTypeDef hlpuart1;
 SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
-#define DB_SIZE 4096
-uint8_t rxBufferA[DB_SIZE];
-uint8_t rxBufferB[DB_SIZE];
-volatile uint32_t rxIndex = 0;
-volatile uint8_t activeBufferIdx = 0; // 0 = A, 1 = B
-volatile uint8_t bufferA_Ready = 0;
-volatile uint8_t bufferB_Ready = 0;
-volatile uint8_t bufferOverrun = 0;
-uint8_t rxTempByte;
-
-volatile uint32_t lastByteTime = 0;
-volatile uint32_t totalBytesReceived = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -111,7 +100,7 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   //some variables for FatFs
-    FATFS FatFs; 	//Fatfs handle
+    // FATFS FatFs; 	//Fatfs handle (Use USERFatFS extern)
     FIL fil; 		//File handle
     FRESULT fres; //Result after operations
 
@@ -120,7 +109,7 @@ int main(void)
     BYTE workBuffer[512];
 
     //Open the file system
-    fres = f_mount(&FatFs, "", 1); //1=mount now
+    fres = f_mount(&USERFatFS, "", 1); //1=mount now
     if (fres != FR_OK) {
   	    printf("f_mount error (%i)\r\n", fres);
         if (fres == FR_NO_FILESYSTEM) {
@@ -129,7 +118,7 @@ int main(void)
             fres = f_mkfs("", FM_ANY, 0, workBuffer, sizeof(workBuffer));
             if (fres == FR_OK) {
                 printf("Format successful! Remounting...\r\n");
-                fres = f_mount(&FatFs, "", 1);
+                fres = f_mount(&USERFatFS, "", 1);
                 if (fres == FR_OK) {
                     printf("Remount successful!\r\n");
                 } else {
@@ -223,207 +212,6 @@ int main(void)
     }
     // --------------------
 
-    // --- USB CDC Image Receive Experiment ---
-    printf("Starting Image Rx (Protocol: START:<filename> -> Data)...\r\n");
-    
-    // Externs from usbd_cdc_if.c
-    extern uint8_t UserRxBufferFS_A[];
-    extern uint8_t UserRxBufferFS_B[];
-    extern volatile uint8_t Buffer_A_Ready;
-    extern volatile uint8_t Buffer_B_Ready;
-    extern volatile uint32_t Buffer_A_Length;
-    extern volatile uint32_t Buffer_B_Length;
-    extern void CDC_Buffer_Processed(uint8_t buffer_id);
-    extern uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len); // Extern Transmit
-
-    // Reset Globals
-    totalBytesReceived = 0;
-    uint32_t lastHeartbeat = 0;
-    lastByteTime = HAL_GetTick();
-    
-    // Ensure flags are clear
-    Buffer_A_Ready = 0;
-    Buffer_B_Ready = 0;
-
-    // State Machine
-    // 0: Waiting for Start Command
-    // 1: Receiving Data
-    uint8_t receiveState = 0; 
-    char currentFilename[64] = {0};
-    uint32_t startTime = 0;
-    uint32_t transferCount = 0;
-    
-    printf("Waiting for command...\r\n");
-
-    while(1) {
-         // --- Heartbeat (Red LED) ---
-         if((HAL_GetTick() - lastHeartbeat) > 500) {
-             HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
-             lastHeartbeat = HAL_GetTick();
-         }
-
-         // check exit condition (Timeout while receiving)
-         if (receiveState == 1 && (HAL_GetTick() - lastByteTime) > 3000) {
-             printf("\r\nEnd of transmission (Timeout). Closing file.\r\n");
-             f_close(&fil);
-
-             // Increment Iteration
-             transferCount++;
-
-             // Calc Speed
-             uint32_t endTime = HAL_GetTick();
-             uint32_t duration_ms = endTime - startTime;
-             if (duration_ms == 0) duration_ms = 1;
-             uint64_t speed_calc = ((uint64_t)totalBytesReceived * 1000 * 100) / ((uint64_t)1024 * duration_ms);
-             printf("Iter: %lu, Duration: %lu ms\r\n", transferCount, duration_ms);
-             printf("Received: %lu bytes\r\n", totalBytesReceived);
-             printf("Speed: %lu.%02lu KB/s\r\n", (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
-
-             // --- Save Log to SD Card ---
-             FIL logFile;
-             if(f_open(&logFile, "log.txt", FA_OPEN_APPEND | FA_WRITE) == FR_OK) {
-                 char logBuf[128];
-                 int len = snprintf(logBuf, sizeof(logBuf), "Iter:%lu, Tick:%lu, File:%s, Size:%lu B, Time:%lu ms, Speed:%lu.%02lu KB/s\r\n",
-                                    transferCount, HAL_GetTick(), currentFilename, totalBytesReceived, duration_ms, (uint32_t)(speed_calc/100), (uint32_t)(speed_calc%100));
-
-                 UINT bw_log;
-                 f_write(&logFile, logBuf, len, &bw_log);
-                 f_close(&logFile);
-                 printf("Log saved to log.txt\r\n");
-             } else {
-                 printf("Failed to open log.txt\r\n");
-             }
-
-             // Reset State for next transfer
-             receiveState = 0;
-             totalBytesReceived = 0;
-             memset(currentFilename, 0, sizeof(currentFilename));
-             printf("\r\nReady for next command...\r\n");
-             // Do not break; continue loop
-          }
-         
-         // Process Buffer A
-         if(Buffer_A_Ready) {
-             lastByteTime = HAL_GetTick();
-             HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Blue LED Activity
-
-             if (receiveState == 0) {
-                 // Check for START: command
-                 if (strncmp((char*)UserRxBufferFS_A, "START:", 6) == 0 && Buffer_A_Length > 6) {
-                     memset(currentFilename, 0, sizeof(currentFilename));
-                     uint32_t nameLen = Buffer_A_Length - 6;
-                     if(nameLen > 63) nameLen = 63;
-                     memcpy(currentFilename, UserRxBufferFS_A + 6, nameLen);
-                     
-                     // Sanitize filename (remove non-printable)
-                     for(int i=0; i<nameLen; i++) {
-                         if(currentFilename[i] < 32 || currentFilename[i] > 126) currentFilename[i] = 0;
-                     }
-
-                     printf("CMD Received. File: %s\r\n", currentFilename);
-                     fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
-                     
-                     // Retry logic for robust long-running
-                     if (fres != FR_OK) {
-                         printf("File Open Failed (%d). Attempting Remount...\r\n", fres);
-                         f_mount(NULL, "", 0); // Unmount
-                         HAL_Delay(50);
-                         fres = f_mount(&FatFs, "", 1); // Remount
-                         if (fres == FR_OK) {
-                              fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
-                         } else {
-                              printf("Remount failed (%d)\r\n", fres);
-                         }
-                     }
-
-                     if(fres == FR_OK) {
-                         receiveState = 1;
-                         startTime = HAL_GetTick();
-                         totalBytesReceived = 0;
-                         CDC_Transmit_FS((uint8_t*)"OK", 2); // Send ACK
-                         printf("File Open. Sending ACK. Receiving...\r\n");
-                     } else {
-                         printf("Create File Failed: %d\r\n", fres);
-                         CDC_Transmit_FS((uint8_t*)"ERR", 3);
-                     }
-                 } else {
-                     printf("Ignored Invalid Start Packet (Len: %lu)\r\n", Buffer_A_Length);
-                 }
-             } 
-             else if (receiveState == 1) {
-                 // Write Data
-                 UINT bw;
-                 fres = f_write(&fil, UserRxBufferFS_A, Buffer_A_Length, &bw);
-                 if(fres != FR_OK) printf("Write Error: %d\r\n", fres);
-                 totalBytesReceived += Buffer_A_Length;
-             }
-             
-             CDC_Buffer_Processed(0); // Release A
-         }
-
-         // Process Buffer B
-         if(Buffer_B_Ready) {
-             lastByteTime = HAL_GetTick();
-             HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); 
-
-             if (receiveState == 0) {
-                 // Usually commands come in A if single packet, but handle B just in case
-                  if (strncmp((char*)UserRxBufferFS_B, "START:", 6) == 0 && Buffer_B_Length > 6) {
-                     memset(currentFilename, 0, sizeof(currentFilename));
-                     uint32_t nameLen = Buffer_B_Length - 6;
-                     if(nameLen > 63) nameLen = 63;
-                     memcpy(currentFilename, UserRxBufferFS_B + 6, nameLen);
-                     
-                     for(int i=0; i<nameLen; i++) {
-                         if(currentFilename[i] < 32 || currentFilename[i] > 126) currentFilename[i] = 0;
-                     }
-
-                     printf("CMD Received (B). File: %s\r\n", currentFilename);
-                     fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
-                     
-                     // Retry logic for robust long-running
-                     if (fres != FR_OK) {
-                         printf("File Open Failed (%d). Attempting Remount...\r\n", fres);
-                         f_mount(NULL, "", 0); // Unmount
-                         HAL_Delay(50);
-                         fres = f_mount(&FatFs, "", 1); // Remount
-                         if (fres == FR_OK) {
-                              fres = f_open(&fil, currentFilename, FA_WRITE | FA_CREATE_ALWAYS);
-                         } else {
-                              printf("Remount failed (%d)\r\n", fres);
-                         }
-                     }
-
-                     if(fres == FR_OK) {
-                         receiveState = 1;
-                         startTime = HAL_GetTick();
-                         totalBytesReceived = 0;
-                         CDC_Transmit_FS((uint8_t*)"OK", 2);
-                         printf("File Open. Sending ACK. Receiving...\r\n");
-                     } else {
-                         printf("Create File Failed: %d\r\n", fres);
-                         CDC_Transmit_FS((uint8_t*)"ERR", 3);
-                     }
-                 }
-             } 
-             else if (receiveState == 1) {
-                 UINT bw;
-                 fres = f_write(&fil, UserRxBufferFS_B, Buffer_B_Length, &bw);
-                 if(fres != FR_OK) printf("Write Error: %d\r\n", fres);
-                 totalBytesReceived += Buffer_B_Length;
-             }
-             
-             CDC_Buffer_Processed(1); // Release B
-         }
-    }
-    // ----------------------
-
-    // ------------------
-
-    //We're done, so de-mount the drive
-    HAL_Delay(100);
-    f_mount(NULL, "", 0);
-    printf("unmount complete\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -433,6 +221,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    save_sd();
   }
   /* USER CODE END 3 */
 }
