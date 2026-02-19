@@ -1,146 +1,101 @@
+
 import serial
 import time
-import base64
 import os
 import sys
-import zlib
 
-# Configuration matches STM32 LPUART1
-PORT = "COM5"
-BAUDRATE = 209700 # Updated to match STM32 configuration
+# ==========================================
+# Configuration
+# ==========================================
+PORT = "COM5"      # Adjust your COM port
+BAUDRATE = 209700  # Adjust your baudrate
 OUTPUT_DIR = "received_images"
+FILENAME = "output.jpg" 
 
-def main():
+# ==========================================
+# Main Receiver Logic
+# ==========================================
+def receive_image_packets(output_filename):
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
-
+        
+    filepath = os.path.join(OUTPUT_DIR, output_filename)
+    
+    received_chunks = {} 
+    
     print(f"Connecting to {PORT} at {BAUDRATE}...")
     try:
-        # Use 7-bit simulation if needed, but pyserial handles bytes. 
-        # Since we send Base64 (ASCII), standard 8-N-1 or 7-N-1 works fine.
-        ser = serial.Serial(PORT, BAUDRATE, timeout=2)
+        ser = serial.Serial(PORT, BAUDRATE, timeout=1)
+        print("Listening for packets...")
     except Exception as e:
         print(f"Error opening port: {e}")
         return
 
-    print("Port opened. Waiting 3 seconds to stabilize...")
-    time.sleep(3)
+    buffer = bytearray()
     
-    print("Waiting for data...")
-    
-    receiving = False
-    f_out = None
-    crc_calculated = 0
-    crc_received = None
-    save_path = ""
-
     try:
-        total_size = 0
-        current_bytes_written = 0
-        start_time = 0
-
         while True:
             if ser.in_waiting > 0:
-                # Read raw line
-                try:
-                    line = ser.readline().decode('utf-8', errors='ignore').strip()
-                except:
-                    continue
-                
-                if not line:
-                    continue
-
-                if line.startswith("START:"):
-                    # Format: START:filename:size
-                    parts = line.split(":")
-                    if len(parts) >= 3:
-                        original_filename = parts[1]
-                        try:
-                            total_size = int(parts[2])
-                        except:
-                            total_size = 0
-                        
-                        save_name = "receive_jpg.jpg"
-                        print(f"\n[RX] Start Receiving: {original_filename} -> {save_name} (Size: {total_size})")
-                        
-                        save_path = os.path.join(OUTPUT_DIR, save_name)
-                        f_out = open(save_path, "wb")
-                        
-                        current_bytes_written = 0
-                        crc_calculated = 0 # Initial CRC value
-                        crc_received = None # Reset received CRC
-                        start_time = time.time()
-                        receiving = True
-                
-                elif line.startswith("CHECKSUM:"):
-                     # Format: CHECKSUM:0xABC12345
-                     try:
-                         val_str = line.split(":")[1]
-                         crc_received = int(val_str, 16)
-                         print(f"\n[RX] Received Checksum: 0x{crc_received:08X}")
-                     except:
-                         print("\n[RX] Warning: Could not parse checksum")
-
-                elif line == "EXPORT_COMPLETE":
-                    if receiving and f_out:
-                        f_out.close()
-                        f_out = None
-                        
-                        end_time = time.time()
-                        duration = end_time - start_time
-                        
-                        print(f"\n[RX] Transfer Complete.")
-                        print(f"Total Bytes Saved: {current_bytes_written}")
-                        if duration > 0:
-                            speed = (current_bytes_written / 1024) / duration
-                            print(f"Time: {duration:.2f} s")
-                            print(f"Speed: {speed:.2f} KB/s")
-                        
-                        # Verify Size
-                        if total_size > 0 and current_bytes_written < total_size:
-                             print(f"Warning: Lost {total_size - current_bytes_written} bytes ({100 - (current_bytes_written/total_size)*100:.1f}%) during transfer.")
-                        
-                        # Verify CRC
-                        print(f"Calculated CRC (zlib): 0x{crc_calculated:08X}")
-                        
-                        if crc_received is not None:
-                            if crc_received == crc_calculated:
-                                print("CRC CHECK: PASS (Standard zlib match)")
-                            else:
-                                print(f"CRC CHECK: FAIL (Expected: 0x{crc_received:08X}, Got: 0x{crc_calculated:08X})")
-                                print("Note: Mismatch might be due to CRC variant differences (Reflected vs Non-reflected).")
-                                
-                    receiving = False
-                
-                elif receiving:
-                    # Decode Line Immediately
-                    try:
-                        # Attempt decode
-                        chunk_data = base64.b64decode(line)
-                        f_out.write(chunk_data)
-                        current_bytes_written += len(chunk_data)
-                        
-                        # Update CRC
-                        crc_calculated = zlib.crc32(chunk_data, crc_calculated)
-
-                        # UI Update
-                        if total_size > 0:
-                             pct = (current_bytes_written / total_size) * 100
-                             if current_bytes_written % 4096 == 0: # Update less frequently
-                                 sys.stdout.write(f"\rProgress: {pct:.1f}%")
-                                 sys.stdout.flush()
-                                 
-                    except Exception as e:
-                        # If a single line is corrupted, we skip it but keep the file open
-                        pass
-            else:
-                 # Only sleep if no data waiting, to maximize throughput
-                 time.sleep(0.001)
+                chunk = ser.read(ser.in_waiting)
+                for b in chunk:
+                    if b == 0xC0: # FEND
+                        if len(buffer) > 0:
+                            # Process Frame
+                            process_packet(buffer, received_chunks)
+                            buffer = bytearray()
+                    elif b == 0xDB: # ESC
+                        # Read next byte for escaped value
+                        # Note: In a real stream, next byte might not be here yet.
+                        # This simple loop assumes it is or we wait.
+                        # Ideally, state machine.
+                        # For now, let's just peek/wait a tiny bit.
+                        nb_data = ser.read(1)
+                        if nb_data:
+                            nb = nb_data[0]
+                            if nb == 0xDC: buffer.append(0xC0)
+                            elif nb == 0xDD: buffer.append(0xDB)
+                            else: buffer.append(nb) 
+                    else:
+                        buffer.append(b)
+            
+            time.sleep(0.001)
 
     except KeyboardInterrupt:
-        print("\nStopping...")
-        if ser.is_open:
-            ser.close()
+        print("\nStopped.")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if 'ser' in locals() and ser.is_open: ser.close()
+        
+        # Save File
+        if received_chunks:
+            print(f"Saving {len(received_chunks)} chunks to {filepath}")
+            # Sort by ID
+            sorted_ids = sorted(received_chunks.keys())
+            
+            with open(filepath, "wb") as f:
+                for cid in sorted_ids:
+                    f.write(received_chunks[cid])
+            print(f"Saved: {filepath}")
+        else:
+            print("No chunks received.")
+
+def process_packet(data, received_chunks):
+    # Packet Format: [CMD(1)] [ID(4)] [NAME(12)] [DATA(64)] [CRC(4)]
+    # Total = 85 bytes
+    
+    if len(data) < 85: return
+    
+    cmd = data[0]
+    chunk_id = int.from_bytes(data[1:5], 'little')
+    img_data = data[17:17+64] # Fixed 64 bytes
+    
+    if cmd == 0x13:
+        if chunk_id not in received_chunks:
+            received_chunks[chunk_id] = img_data
+            print(f"RX Chunk #{chunk_id}")
+
+
 
 if __name__ == "__main__":
-    main()
+    receive_image_packets(FILENAME)

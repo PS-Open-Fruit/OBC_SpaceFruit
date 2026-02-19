@@ -15,5 +15,6 @@ void SD_Init(void);
 void SD_SendFile(char *filename, uint16_t sector);
 void SD_SaveFiles(void);
 void SD_ListFiles_KISS(void);
+void SD_SendFile_Windowed(char *filename);
 
 #endif /* SD_UTILS_H */

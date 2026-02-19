@@ -1,0 +1,233 @@
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.6%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4973923
+Time: 433.94 s
+Speed: 11.19 KB/s
+Warning: Lost 18944 bytes (0.4%) during transfer.
+Calculated CRC (STM32): 0x9E92171B
+CRC CHECK: FAIL (Expected: 0x2A9B4854, Got: 0x9E92171B)
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 0.2%
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> ^C
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 436.14 s
+Speed: 11.18 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 2.1%
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 436.14 s
+Speed: 11.18 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 436.14 s
+Speed: 11.18 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 115200...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> ^C
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 115200...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 699.03 s
+Speed: 6.98 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 115200...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 699.03 s
+Speed: 6.98 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+Stopping...
+
+Connecting to COM5 at 9600...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 7081.35 s
+Speed: 0.69 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 9600...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 99.9%
+[RX] Received Checksum: 0x2A9B4854
+
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 7080.97 s
+Speed: 0.69 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+CRC CHECK: PASS (0x2A9B4854)
+
+Stopping...
+
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py                         
+Connecting to COM5 at 115200...                                                                     
+Port opened. Waiting 3 seconds to stabilize...                                                      
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 100.0%
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 542.93 s
+Speed: 8.98 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+
+[RX] Received Checksum: 0x2A9B4854
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 115200...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 100.0%
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 543.00 s
+Speed: 8.98 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+
+[RX] Received Checksum: 0x2A9B4854
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 115200...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 100.0%
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 543.00 s
+Speed: 8.98 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+
+[RX] Received Checksum: 0x2A9B4854
+
+Stopping...
+(.venv) PS D:\github\OBC_SpaceFruit> python .\PY_RECEIVE_JPG\receive_jpg.py
+Connecting to COM5 at 209700...
+Port opened. Waiting 3 seconds to stabilize...
+Waiting for data...
+
+[RX] Start Receiving: 01261311.JPG -> 01261311.JPG (Size: 4992867)
+Progress: 100.0%
+[RX] Transfer Complete.
+Total Bytes Saved: 4992867
+Time: 346.15 s
+Speed: 14.09 KB/s
+Calculated CRC (STM32): 0x2A9B4854
+
+[RX] Received Checksum: 0x2A9B4854
+
+Stopping...

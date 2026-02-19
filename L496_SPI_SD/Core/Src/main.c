@@ -25,7 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "../../Sd_SPI/sd_save.h"
+#include "../../Common/Sdcard_SPI/sd_utils.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,6 +44,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CRC_HandleTypeDef hcrc;
+
 UART_HandleTypeDef hlpuart1;
 
 SPI_HandleTypeDef hspi1;
@@ -56,6 +58,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PFP */
@@ -98,119 +101,10 @@ int main(void)
   MX_SPI1_Init();
   MX_FATFS_Init();
   MX_USB_DEVICE_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
-  //some variables for FatFs
-    // FATFS FatFs; 	//Fatfs handle (Use USERFatFS extern)
-    FIL fil; 		//File handle
-    FRESULT fres; //Result after operations
-
-    //Buffer for f_mkfs work area and file reading
-    //Must be at least the size of one sector (512 bytes) for f_mkfs
-    BYTE workBuffer[512];
-
-    //Open the file system
-    fres = f_mount(&USERFatFS, "", 1); //1=mount now
-    if (fres != FR_OK) {
-  	    printf("f_mount error (%i)\r\n", fres);
-        if (fres == FR_NO_FILESYSTEM) {
-            printf("No valid FAT filesystem found. Attempting to format to FAT32...\r\n");
-            //Format the card. FM_ANY will choose FAT32 for 64GB usually.
-            fres = f_mkfs("", FM_ANY, 0, workBuffer, sizeof(workBuffer));
-            if (fres == FR_OK) {
-                printf("Format successful! Remounting...\r\n");
-                fres = f_mount(&USERFatFS, "", 1);
-                if (fres == FR_OK) {
-                    printf("Remount successful!\r\n");
-                } else {
-                    printf("Remount failed error (%i)\r\n", fres);
-                    while(1);
-                }
-            } else {
-                printf("Format failed error (%i)\r\n", fres);
-                while(1);
-            }
-        } else {
-  	        while(1);
-        }
-    }
-
-    //Let's get some statistics from the SD card
-    DWORD free_clusters, free_sectors, total_sectors;
-
-    FATFS* getFreeFs;
-
-    fres = f_getfree("", &free_clusters, &getFreeFs);
-    if (fres != FR_OK) {
-  	printf("f_getfree error (%i)\r\n", fres);
-  	while(1);
-    }
-
-    //Formula comes from ChaN's documentation
-    total_sectors = (getFreeFs->n_fatent - 2) * getFreeFs->csize;
-    free_sectors = free_clusters * getFreeFs->csize;
-
-    printf("SD card stats:\r\n%10lu KiB total drive space.\r\n%10lu KiB available.\r\n", total_sectors / 2, free_sectors / 2);
-
-    //Now let's try to open file "test.txt"
-    fres = f_open(&fil, "test.txt", FA_READ);
-    if (fres != FR_OK) {
-  	    //If file doesn't exist (e.g. after format), just print and continue
-        printf("Could not open 'test.txt' for reading (Error %i). Skipping read test.\r\n", fres);
-    } else {
-        printf("I was able to open 'test.txt' for reading!\r\n");
-    
-        //We can either use f_read OR f_gets to get data out of files
-        //f_gets is a wrapper on f_read that does some string formatting for us
-        TCHAR* rres = f_gets((TCHAR*)workBuffer, 512, &fil);
-    if(rres != 0) {
-  	printf("Read string from 'test.txt' contents: %s\r\n", workBuffer);
-    } else {
-  	printf("f_gets error (%i)\r\n", fres);
-    }
-
-    //Be a tidy kiwi - don't forget to close your file!
-    f_close(&fil);
-    }
-
-    //Now let's try and write a file "write.txt"
-    fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
-    if(fres == FR_OK) {
-  	printf("I was able to open 'write.txt' for writing\r\n");
-    } else {
-  	printf("f_open error (%i)\r\n", fres);
-    }
-
-    //Copy in a string
-    char text[] = "this is test for STM32L496ZG use FatFs library with SPI SD Card reader to save the text.";
-    snprintf((char*)workBuffer, 512, text);
-    UINT bytesWrote;
-    fres = f_write(&fil, workBuffer, strlen(text), &bytesWrote);
-    if(fres == FR_OK) {
-  	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
-    } else {
-  	printf("f_write error (%i)\r\n", fres);
-    }
-
-    //Be a tidy kiwi - don't forget to close your file!
-    f_close(&fil);
-    printf("close complete\r\n");
-
-    // --- Verify Write ---
-    printf("Verifying write...\r\n");
-    fres = f_open(&fil, "write.txt", FA_READ);
-    if (fres == FR_OK) {
-        memset(workBuffer, 0, sizeof(workBuffer)); // Clear buffer
-        TCHAR* rres = f_gets((TCHAR*)workBuffer, 512, &fil);
-        if(rres != 0) {
-            printf("Read back from 'write.txt': %s\r\n", workBuffer);
-        } else {
-            printf("f_gets on write.txt failed\r\n");
-        }
-        f_close(&fil);
-    } else {
-        printf("Failed to open 'write.txt' for verification (Error %i)\r\n", fres);
-    }
-    // --------------------
+  // Initialize SD Card
+  SD_Init();
 
   /* USER CODE END 2 */
 
@@ -221,7 +115,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    save_sd();
+    SD_SaveFiles();
   }
   /* USER CODE END 3 */
 }
@@ -284,6 +178,37 @@ void SystemClock_Config(void)
   /** Enable MSI Auto calibration
   */
   HAL_RCCEx_EnableMSIPLLMode();
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_BYTE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_ENABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
 }
 
 /**

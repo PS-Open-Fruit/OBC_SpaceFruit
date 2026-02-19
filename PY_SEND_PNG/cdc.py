@@ -3,6 +3,7 @@ import serial.tools.list_ports
 import time
 import os
 import sys
+import base64
 from datetime import datetime
 
 # Configuration
@@ -11,7 +12,7 @@ BAUDRATE = 115200
 TIMEOUT = 2
 CHUNK_SIZE = 4096 # Send in 4KB chunks
 script_dir = os.path.dirname(os.path.abspath(__file__))
-TARGET_FILE = os.path.join(script_dir, 'Panorama_of_3mb.jpg')
+TARGET_FILE = os.path.join(script_dir, 'file_example_JPG_1MB.jpg')
 
 def list_serial_ports():
     ports = serial.tools.list_ports.comports()
@@ -69,33 +70,43 @@ def send_file(serial_port, file_path):
                 print("Failed to initialize file transfer (Device rejected all attempts). Aborting.")
                 return
 
-            # --- Protocol: 3. Send Data ---
+            # --- Protocol: 3. Send Data (Base64 Encoded) ---
+            print("Encoding file to Base64...")
             start_time = time.time()
             bytes_sent = 0
             
             with open(file_path, 'rb') as f:
-                while True:
-                    chunk = f.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    
-                    ser.write(chunk)
-                    bytes_sent += len(chunk)
-                    
-                    # Calculate progress
-                    progress = (bytes_sent / file_size) * 100
-                    sys.stdout.write(f"\rProgress: {progress:.1f}% ({bytes_sent}/{file_size} bytes)")
-                    sys.stdout.flush()
-                    
-                    # Delay to prevent buffer overflow
-                    time.sleep(0.05) 
+                file_content = f.read()
+                
+            encoded_content = base64.b64encode(file_content)
+            total_size_b64 = len(encoded_content)
+            print(f"Encoded Size: {total_size_b64} bytes (Original: {file_size})")
+
+            # Send in chunks from memory
+            offset = 0
+            while offset < total_size_b64:
+                chunk = encoded_content[offset : offset + CHUNK_SIZE]
+                if not chunk:
+                    break
+                
+                ser.write(chunk)
+                bytes_sent += len(chunk)
+                offset += len(chunk)
+                
+                # Calculate progress
+                progress = (bytes_sent / total_size_b64) * 100
+                sys.stdout.write(f"\rProgress: {progress:.1f}% ({bytes_sent}/{total_size_b64} bytes)")
+                sys.stdout.flush()
+                
+                # Delay to prevent buffer overflow
+                time.sleep(0.02) # Slightly faster delay since text is safer
                     
             end_time = time.time()
             duration = end_time - start_time
             speed = (bytes_sent / 1024) / duration if duration > 0 else 0
             
             print(f"\n\nDone!")
-            print(f"Wrote: {bytes_sent} bytes")
+            print(f"Wrote: {bytes_sent} bytes (Base64)")
             print(f"Time: {duration:.2f} s")
             print(f"Speed: {speed:.2f} KB/s")
             
@@ -114,6 +125,9 @@ def send_file(serial_port, file_path):
 
     except serial.SerialException as e:
         print(f"\nSerial Error: {e}")
+        print("Available ports:")
+        for p in list_serial_ports():
+            print(f" - {p}")
     except Exception as e:
         print(f"\nError: {e}")
 

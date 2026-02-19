@@ -1,0 +1,894 @@
+import serial
+import threading
+import time
+import sys
+import os
+import struct
+import zlib
+import subprocess
+import shutil
+import json
+from http.server import SimpleHTTPRequestHandler
+from socketserver import TCPServer
+
+# Import KISS Protocol
+current_dir = os.path.dirname(os.path.abspath(__file__))
+shared_path = os.path.join(os.path.dirname(current_dir), 'Shared', 'Python')
+if shared_path not in sys.path:
+    sys.path.append(shared_path)
+try:
+    from kiss_protocol import KISSProtocol
+except ImportError:
+    print("❌ Error: Could not import KISSProtocol.")
+    sys.exit(1)
+
+# ==========================================
+# 1. Config
+# ==========================================
+# PC_PORT = 'COM5'  # Update if needed
+PC_PORT = 'SIM'
+TEST_FILE = "d:\\github\\OBC_SpaceFruit\\file_example_JPG_1MB.jpg"
+BAUDRATE = 209700   # PRODUCTION BAUDRATE
+DOWNLOAD_DIR = "received_images"
+
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
+
+# ==========================================
+# 2. Ground Station Class
+# ==========================================
+
+class WebDashboard:
+    def __init__(self, gs, port=8000, web_dir="web"):
+        self.gs = gs # Reference to GroundStation for callbacks
+        self.port = port
+        self.web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), web_dir)
+        self.thread = threading.Thread(target=self._run_server, daemon=True)
+        self.thread.start()
+        print(f"   🌐 Dashboard active at http://localhost:{port}")
+        
+    def _run_server(self):
+        # Capture context for inner class
+        dashboard = self
+        
+        class Handler(SimpleHTTPRequestHandler):
+            def __init__(req_self, *args, **kwargs):
+                super().__init__(*args, directory=dashboard.web_dir, **kwargs)
+                
+            def log_message(self, format, *args):
+                pass # Suppress logging
+
+            def do_GET(self):
+                if self.path.startswith('/live.jpg'):
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'image/jpeg')
+                    # Prevent caching
+                    self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                    self.end_headers()
+                    
+                    try:
+                        # Create a local reference/copy to avoid race condition during write
+                        if hasattr(dashboard.gs, 'current_img_data'):
+                            # Create immutable bytes copy for sending
+                            data = bytes(dashboard.gs.current_img_data)
+                            self.wfile.write(data)
+                        else:
+                            self.wfile.write(b'')
+                    except Exception:
+                        pass
+                    return
+                    
+                # Serve other files normally
+                super().do_GET()
+
+            def do_POST(self):
+                if self.path == '/api/command':
+                    content_len = int(self.headers.get('Content-Length', 0))
+                    post_body = self.rfile.read(content_len)
+                    try:
+                        data = json.loads(post_body)
+                        cmd = data.get("command")
+                        
+                        if cmd == "ping":
+                            dashboard.gs.send_kiss_command(0x10)
+                        elif cmd == "status":
+                            dashboard.gs.send_kiss_command(0x20)
+                        elif cmd == "capture":
+                            dashboard.gs.send_kiss_command(0x12)
+                            
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(b'{"status":"ok"}')
+                    except Exception as e:
+                        print(f"   ❌ Web API Error: {e}")
+                        self.send_response(500)
+                        self.end_headers()
+                else:
+                    self.send_error(404)
+
+        with TCPServer(("", self.port), Handler) as httpd:
+            httpd.serve_forever()
+
+class GroundStation:
+    def __init__(self, port='COM9', baud=9600):
+        self.port = port
+        self.baud = baud
+        self.ser = None
+        self.running = True
+        
+        # Web Dashboard
+        self.dashboard = WebDashboard(self)
+        self.last_dashboard_update = 0
+        
+        # Dashboard State
+        self.dash_state = {
+            "connection": "OFFLINE",
+            "last_seen": 0,
+            "packet_count": 0,
+            "img_id": 0,
+            "img_progress": 0,
+            "img_size": 0,
+            "vr_status": {
+                "cpu": 0, "temp": 0, "ram": 0, "disk": 0, "uptime": 0, "health": "N/A"
+            },
+            "logs": [],
+            "last_packet": {
+                "hex": "",
+                "crc_ok": False,
+                "filename": "-",
+                "sector_id": "-",
+                "type": "-"
+            }
+        }
+        
+        # Image Transfer State
+        self.current_img_data = bytearray()
+        self.received_chunk_ids = set() # Track unique chunks
+        self.expected_size = 0
+        self.expected_crc = 0
+        self.downloading = False
+        self.start_time = 0
+        
+        # RX State Machine buffers
+        self.log_buffer = bytearray()
+        self.kiss_buffer = bytearray()
+        self.in_frame = False
+
+        # Cleanup old session data
+        try:
+            live_img = os.path.join(self.dashboard.web_dir, "live.jpg")
+            if os.path.exists(live_img):
+                os.remove(live_img)
+            
+            # Reset status.json immediately
+            self.update_json_state()
+        except Exception as e:
+            print(f"   ⚠️ Startup Cleanup Error: {e}")
+
+    def start_download_worker(self):
+        """Starts the background downloader thread."""
+        if hasattr(self, 'worker_thread') and self.worker_thread.is_alive() and self.downloading:
+             print("   [FLOW] Download worker already active.")
+             return
+
+        self.worker_thread = threading.Thread(target=self._download_loop, daemon=True)
+        self.worker_thread.start()
+
+    def _download_loop(self):
+        """Stop-and-Wait ARQ for Image Download"""
+        CHUNK_SIZE = 64
+        if self.expected_size == 0: return
+
+        total_chunks = (self.expected_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+        print(f"   [FLOW] Starting Download Loop: {total_chunks} Chunks")
+
+        for chunk_id in range(total_chunks):
+            if not self.downloading: 
+                print("   [FLOW] Download Cancelled")
+                return
+
+            # Skip if we already got it (e.g. from previous attempt or duplicate)
+            if chunk_id in self.received_chunk_ids:
+                continue
+
+            success = False
+            retries = 0
+            MAX_RETRIES = 10 
+            
+            while not success and retries < MAX_RETRIES and self.downloading:
+                # Send Request: 0x13 + [ChunkID:4]
+                try:
+                    req = struct.pack('<I', chunk_id)
+                    # Use send_kiss_command which now accepts data
+                    # Avoid print spam
+                    self.send_kiss_command(0x13, req, verbose=False) 
+                except Exception as e:
+                    print(f"Error sending request: {e}")
+
+                # Wait for Response
+                timeout = 2.0 # Adjust based on RF conditions
+                start_wait = time.time()
+                while time.time() - start_wait < timeout:
+                    if chunk_id in self.received_chunk_ids:
+                        success = True
+                        break
+                    time.sleep(0.01)
+                
+                if not success:
+                    print(f"   ⚠️ Timeout Chunk {chunk_id}, Retrying ({retries+1}/{MAX_RETRIES})...")
+                    retries += 1
+            
+            if not success:
+                print("   ❌ Max Retries Exceeded. Aborting.")
+                self.downloading = False
+                return
+            
+            # Small inter-frame delay to prevent flooding RF TX buffer
+            time.sleep(0.05)
+
+    def run_simulation(self):
+        time.sleep(1)
+        if not os.path.exists(TEST_FILE):
+             print(f"❌ File not found: {TEST_FILE}")
+             return
+        
+        with open(TEST_FILE, "rb") as f:
+             data = f.read()
+             
+        size = len(data)
+        crc = zlib.crc32(data) & 0xFFFFFFFF
+        
+        print(f"   [SIM] Loading {TEST_FILE} ({size} bytes)")
+        
+        # 1. Start Packet (0x12)
+        # Payload: [ID:2] [Size:4] [CRC:4]
+        payload = struct.pack('<HII', 1, size, crc)
+        # CMD 0x12
+        frame = KISSProtocol.wrap_frame(b'\x12' + payload, KISSProtocol.CMD_DATA)
+        self.process_kiss_frame(frame)
+        
+        time.sleep(1)
+        
+        # 2. Chunks (0x13)
+        chunk_size = 64
+        total_chunks = (size + chunk_size - 1) // chunk_size
+        print(f"   [SIM] Sending {total_chunks} chunks...")
+
+        for i in range(total_chunks):
+            if not self.running: break
+            
+            chunk = data[i*chunk_size : (i+1)*chunk_size]
+            if len(chunk) < 64: chunk = chunk.ljust(64, b'\x00')
+            
+            b_id = struct.pack('<I', i)
+            b_name = b"test_img.jpg".ljust(12, b'\x00')
+            body = b_id + b_name + chunk
+            
+            # CMD 0x13
+            frame = KISSProtocol.wrap_frame(b'\x13' + body, KISSProtocol.CMD_DATA)
+            self.process_kiss_frame(frame)
+            
+            if i % 20 == 0: time.sleep(0.001) # Fast simulation
+            
+        print("   [SIM] Data Feed Complete.")
+
+    def start(self):
+        if self.port == 'SIM':
+            print("🚀 Starting SIMULATION Mode")
+            self.dash_state["connection"] = "ONLINE"
+            self.update_json_state()
+            threading.Thread(target=self.run_simulation, daemon=True).start()
+            self.cli_loop()
+            return
+            
+        print(f"Connecting to {self.port} at {self.baud} baud...")
+        try:
+            self.ser = serial.Serial(self.port, self.baud, timeout=0.1)
+            time.sleep(2) # Wait for reset
+            print("✅ Connected!")
+            self.dash_state["connection"] = "ONLINE"
+            self.update_json_state()
+        except Exception as e:
+            print(f"❌ Connection Failed: {e}")
+            self.dash_state["connection"] = "ERROR"
+            self.update_json_state()
+            return
+
+        # Start background listener thread
+        rx_thread = threading.Thread(target=self.listen_loop, daemon=True)
+        rx_thread.start()
+
+        # Start main CLI loop
+        self.cli_loop()
+
+    def send_kiss_command(self, cmd_id, data=b'', verbose=True):
+        """Sends a KISS-framed command to the OBC with CRC32."""
+        if not self.ser or not self.ser.is_open: 
+            print("❌ Serial Closed")
+            return
+        
+        # Construct Payload: [APP_CMD] + [DATA]
+        app_payload = bytes([cmd_id]) + data
+        
+        # Calculate CRC over [KISS_CMD_DATA] + [APP_PAYLOAD]
+        # This matches OBC behavior (Symmetry)
+        data_to_crc = bytes([KISSProtocol.CMD_DATA]) + app_payload
+        crc = KISSProtocol.calculate_crc(data_to_crc)
+        crc_bytes = struct.pack('<I', crc)
+        
+        # Full Payload: [APP_CMD] [DATA] [CRC]
+        full_payload = app_payload + crc_bytes
+        
+        # Wrap in KISS Data Frame (CMD 0x00)
+        # Wire: [FEND] [0x00] [APP_CMD] [DATA] [CRC] [FEND]
+        frame = KISSProtocol.wrap_frame(full_payload, KISSProtocol.CMD_DATA)
+        
+        self.ser.write(frame)
+        if verbose:
+            if len(data) == 0:
+                print(f"   [TX] Sent CMD: 0x{cmd_id:02X} (CRC: {crc:08X})")
+            else:
+                print(f"   [TX] Sent CMD: 0x{cmd_id:02X} Len:{len(data)} (CRC: {crc:08X})")
+
+    def cli_loop(self):
+        """Interactive Command Line Interface."""
+        print("\n--- 🛰️ OBC GROUND STATION CLI ---")
+        print("Commands: [c]apture, [s]tatus, [p]ing, [q]uit")
+        print("---------------------------------------")
+
+        while self.running:
+            try:
+                cmd = input("GS> ").strip().lower()
+                
+                if cmd in ['q', 'quit', 'exit']:
+                    print("Shutting down...")
+                    self.running = False
+                    break
+                
+                elif cmd in ['p', 'ping']:
+                    self.send_kiss_command(0x10) # 0x10 = Ping
+                    
+                elif cmd in ['s', 'status']:
+                    self.send_kiss_command(0x20) # 0x20 = Status Request
+                    
+                elif cmd in ['c', 'capture']:
+                    self.send_kiss_command(0x12) # 0x12 = Capture
+                    print("   REQUESTED CAPTURE...")
+
+            except KeyboardInterrupt:
+                self.running = False
+                break
+
+    def listen_loop(self):
+        """
+        Main RX Loop.
+        Parses stream for:
+        1. Plain ASCII logs (outside KISS frames)
+        2. KISS Frames (Image Data)
+        """
+        print("🎧 Listening for Telemetry...")
+        
+        while self.running and self.ser.is_open:
+            try:
+                # Read 1 byte at a time for precise state machine
+                byte = self.ser.read(1)
+                
+                if not byte:
+                    continue
+                
+                b = byte[0] # Get int value
+                
+                if b == KISSProtocol.FEND:
+                    if self.in_frame:
+                        # End of Frame
+                        if len(self.kiss_buffer) > 0:
+                            self.process_kiss_frame(self.kiss_buffer)
+                        self.kiss_buffer = bytearray() # Reset
+                        self.in_frame = False
+                    else:
+                        # Start of Frame
+                        self.in_frame = True
+                        self.kiss_buffer = bytearray()
+                        
+                elif self.in_frame:
+                    self.kiss_buffer.append(b)
+                
+                # Ignore raw bytes outside frames (No Raw Text allowed)
+            
+            except Exception as e:
+                print(f"RX Error: {e}")
+                time.sleep(1)
+
+    def process_kiss_frame(self, escaped_data):
+        """Unescapes and handles KISS payload."""
+        payload = KISSProtocol.unescape(escaped_data)
+        
+        # Min size: [CMD:1] [CRC:4] = 5 bytes
+        if len(payload) < 5: return 
+        
+        # 1. Extract Components
+        cmd_byte = payload[0]
+        data_content = payload[0:-4] # CMD + PAYLOAD (Excluding CRC)
+        received_crc_bytes = payload[-4:]
+        
+        if len(data_content) > 1:
+            payload_body = data_content[1:]
+        else:
+            payload_body = bytearray()
+        
+        # Handle Nested commands inside KISS Data (0x00)
+        # If payload starts with [0x12] (Start) or [0x13] (Chunk), promote it
+        if cmd_byte == 0x00 and len(payload_body) > 0:
+            if payload_body[0] == 0x12:
+                cmd_byte = 0x12
+                payload_body = payload_body[1:]
+            elif payload_body[0] == 0x13:
+                cmd_byte = 0x13
+                payload_body = payload_body[1:]
+
+        self.dash_state["packet_count"] += 1
+        
+        # 2. Extract CRC
+        received_crc = struct.unpack('<I', received_crc_bytes)[0]
+        
+        data_to_check = data_content
+        data_to_check = data_content
+        calc_crc = KISSProtocol.calculate_crc(data_to_check)
+        crc_ok = (calc_crc == received_crc)
+
+        # Update Last Packet Info for Dashboard
+        hex_data = payload.hex().upper()
+        # Truncate for display if too long
+        if len(hex_data) > 50:
+             hex_display = hex_data[:25] + "..." + hex_data[-25:]
+        else:
+             hex_display = hex_data
+
+        pkt_info = {
+            "hex": hex_display,
+            "crc_ok": crc_ok,
+            "filename": "-",
+            "sector_id": "-",
+            "type": f"CMD 0x{cmd_byte:02X}"
+        }
+
+        # Try to parse specific fields
+        parse_chunk = False
+        payload_body_temp = data_content[1:]
+        
+        if cmd_byte == 0x13 or cmd_byte == 0x12:
+             parse_chunk = True
+         
+        if parse_chunk:
+            if len(payload_body) >= 16:
+                try:
+                    sid = struct.unpack('<I', payload_body[0:4])[0]
+                    fname = payload_body[4:16].decode('utf-8', errors='ignore').strip('\x00')
+                    pkt_info["sector_id"] = str(sid)
+                    pkt_info["filename"] = fname
+                    pkt_info["type"] = "IMG CHUNK" if cmd_byte == 0x13 else "IMG START"
+                except: pass
+
+        self.dash_state["last_packet"] = pkt_info
+        
+        if calc_crc != received_crc:
+            if cmd_byte == 0x13: # Img Chunk
+                print(f"\n⚠️ CRC ERROR on Chunk (Passing to SSDV...) Calc {calc_crc:08X} != Rx {received_crc:08X}")
+                # Pass through for SSDV FEC to handle
+            else:
+                print(f"\n⚠️ CRC ERROR: Calc {calc_crc:08X} != Rx {received_crc:08X} (Cmd: {cmd_byte:02X})")
+                return
+
+        if cmd_byte == 0x01:
+             text = payload_body.decode('utf-8', errors='replace')
+             self.process_log_line(text)
+             return
+
+        # CMD 0x12: Capture Response (Start Download)
+        if cmd_byte == 0x12:
+            # Payload: [ImgID:2] [Size:4] [CRC:4]
+            if len(payload_body) < 10: return
+            img_id = struct.unpack('<H', payload_body[0:2])[0]
+            self.expected_size = struct.unpack('<I', payload_body[2:6])[0]
+            self.expected_crc = struct.unpack('<I', payload_body[6:10])[0]
+            
+            sys.stdout.write("\r")
+            
+            print(f"   [RX] START IMG #{img_id}, Size: {self.expected_size/1024:.2f} KB")
+            
+            self.downloading = True
+            self.image_chunks = {} # Store chunks {id: bytes}
+            self.current_img_data = bytearray()
+            self.received_chunk_ids = set()
+            self.start_time = time.time()
+            
+            # Reset Dashboard
+            self.dash_state["img_id"] = img_id
+            self.dash_state["img_size"] = self.expected_size
+            self.dash_state["img_progress"] = 0
+            self.dash_state["img_status_text"] = None
+            
+            try:
+                placeholder = os.path.join(self.dashboard.web_dir, "live.jpg")
+                if os.path.exists(placeholder): os.remove(placeholder)
+            except: pass
+            
+            self.update_json_state()
+            self.start_download_worker() # Start the flow control worker
+            return
+            
+        # CMD 0x21: VR Status Report (Raw Data)
+        if cmd_byte == 0x21:
+            # Payload Structure: [VR Data...] [VR CRC (4 bytes)]
+            
+            pl = payload_body
+            pl_len = len(pl)
+
+            # Robust unpacking (ignore tail CRC)
+            try:
+                if pl_len >= 17: # Handle Throttled (17 bytes)
+                    cpu = pl[0]
+                    temp, ram, disk, uptime, throttled = struct.unpack('<fHIIH', pl[1:17])
+                    
+                    # Decode Throttled (Bits 0-19)
+                    status_flags = []
+                    if throttled & 0x1: status_flags.append("⚡ UV LO")
+                    if throttled & 0x2: status_flags.append("📉 FRQ CAP")
+                    if throttled & 0x4: status_flags.append("🔥 THRTL")
+                    if throttled & 0x8: status_flags.append("🌡️ SOFT T")
+                    
+                    hist_flags = []
+                    if throttled & 0x10000: hist_flags.append("Was UV")
+                    if throttled & 0x40000: hist_flags.append("Was Thrtl")
+                    
+                    throttled_str = "OK"
+                    if status_flags: throttled_str = " | ".join(status_flags)
+                    if hist_flags: throttled_str += f" (History: {', '.join(hist_flags)})"
+                    
+                elif pl_len >= 15: # Handle Uptime (15 bytes)
+                    cpu = pl[0]
+                    temp, ram, disk, uptime = struct.unpack('<fHII', pl[1:15])
+                    throttled_str = "N/A"
+                    
+                else: 
+                     print(f"   [RX] VR Status Too Short: {pl_len}")
+                     return
+                
+                # Update Dashboard State
+                self.dash_state["vr_status"] = {
+                    "cpu": round(cpu, 1),
+                    "temp": round(temp, 1),
+                    "ram": ram,
+                    "disk": disk,
+                    "uptime": uptime,
+                    "health": throttled_str
+                }
+                self.update_json_state()
+
+                print(f"\n   📊 [VR STATUS DASHBOARD]")
+                print(f"   ----------------------------------")
+                print(f"   ⏱️ Uptime : {uptime} s ({uptime/3600:.1f} h)")
+                print(f"   🧠 CPU    : {cpu}%")
+                print(f"   🌡️ Temp   : {temp:.1f} °C")
+                print(f"   💾 RAM    : {ram} MB Free")
+                print(f"   💿 Disk   : {disk} MB Free")
+                print(f"   ⚠️ Health : {throttled_str}")
+                print(f"   ----------------------------------\n")
+                sys.stdout.write("GS> ")
+                sys.stdout.flush()
+                
+            except Exception as e:
+                print(f"   [RX] Error parsing status: {e}")
+
+            return
+
+        # CMD 0x13: Image Data (Chunk Response) or 0x00 (Data)
+        if cmd_byte == 0x13 or cmd_byte == 0x00:
+            # Debug incoming packet structure to diagnose the 65555 (0x10013) issue
+            print(f"DEBUG: CMD={cmd_byte:02X} BodyHead={payload_body[:8].hex()}")
+
+            # Should be at least 16 bytes for valid chunk
+            if len(payload_body) < 16: return 
+
+            # Auto-Start if we missed the Start Packet
+            if not self.downloading:
+                 print("\n   ⚠️ Auto-Starting Download (Start Packet Missed)")
+                 self.downloading = True
+                 self.image_chunks = {}
+                 self.received_chunk_ids = set()
+                 self.start_time = time.time()
+                 self.expected_size = 0 # Unknown
+                 self.expected_crc = 0
+                 self.dash_state["img_id"] = 0
+                 self.dash_state["img_size"] = 0
+                 self.dash_state["img_progress"] = 0
+                 self.update_json_state()
+            
+            # Format: [SectorID:4][Filename:12][Data:64] 
+            
+            # SectorID (4 bytes)
+            chunk_id = struct.unpack('<I', payload_body[0:4])[0]
+            
+            # Filename (12 bytes) - Not used for logic but part of protocol
+            # filename = payload_body[4:16]
+            
+            img_chunk = payload_body[16:]
+            print(f"Chunk ID: {chunk_id}, Len: {len(img_chunk)}")
+            
+            # Deduplication Check
+            if chunk_id in self.received_chunk_ids:
+                 return # Duplicate
+
+            self.received_chunk_ids.add(chunk_id)
+            
+            # Store Chunk
+            if not hasattr(self, 'image_chunks'): self.image_chunks = {}
+            self.image_chunks[chunk_id] = img_chunk
+            
+            # Update Progress Bar (Length only)
+            if self.expected_size > 0:
+                self.current_img_data_len = len(self.image_chunks) * 64 # Approx
+            else:
+                 self.current_img_data_len = max(self.image_chunks.keys()) * 64 + len(img_chunk)
+            
+            # Reconstruct for display if throttling allows
+            if time.time() - self.last_dashboard_update > 0.1:
+                # Rebuild image from chunks
+                if not self.image_chunks: return
+
+                max_chunk = max(self.image_chunks.keys())
+                
+                # Determine Buffer Size
+                if self.expected_size > 0:
+                    total_len = self.expected_size
+                else:
+                    total_len = (max_chunk * 64) + len(self.image_chunks[max_chunk])
+                
+                new_data = bytearray(total_len)
+                
+                # Fill buffer
+                for cid, data in self.image_chunks.items():
+                    offset = cid * 64
+                    end = offset + len(data)
+                    # Clip to total_len to prevent overflow if expected_size is wrong
+                    if offset < total_len:
+                        w_len = min(len(data), total_len - offset)
+                        new_data[offset : offset + w_len] = data[:w_len]
+                        
+                self.current_img_data = new_data
+                
+                # Update Progress & Status
+                # Better progress: (received bytes / expected bytes)
+                bytes_received = sum(len(v) for v in self.image_chunks.values())
+                
+                if self.expected_size > 0:
+                     self.dash_state["img_progress"] = int((bytes_received / self.expected_size) * 100)
+                else:
+                     self.dash_state["img_progress"] = 0
+                
+                # Update Status Text
+                header_msg = ""
+                if 0 not in self.image_chunks:
+                     header_msg = " | ⚠️ NO HEADER"
+                
+                self.dash_state["img_status_text"] = f"Recv: {bytes_received/1024:.1f} KB{header_msg}"
+                
+                self.update_dashboard()
+                self.last_dashboard_update = time.time()
+                self.print_progress()
+            
+            # Auto-finish if size reached
+            if self.expected_size > 0:
+                 bytes_received = sum(len(v) for v in self.image_chunks.values())
+                 if bytes_received >= self.expected_size:
+                      self.finish_download()
+                
+            return
+
+    def finish_download(self):
+        """Finalizes download and prints stats."""
+        if not self.downloading: return
+        
+        # Reconstruct Full Image for saving
+        if hasattr(self, 'image_chunks') and self.image_chunks:
+            max_chunk = max(self.image_chunks.keys())
+            if self.expected_size > 0:
+                total_len = self.expected_size
+            else:
+                total_len = (max_chunk * 64) + len(self.image_chunks[max_chunk])
+            
+            self.current_img_data = bytearray(total_len)
+            for cid, data in self.image_chunks.items():
+                offset = cid * 64
+                end = offset + len(data)
+                if offset < total_len:
+                    w_len = min(len(data), total_len - offset)
+                    self.current_img_data[offset : offset + w_len] = data[:w_len]
+
+        # Save raw JPG
+        timestamp = int(time.time())
+        filename_jpg = os.path.join(DOWNLOAD_DIR, f"img_{timestamp}.jpg")
+        
+        try:
+            with open(filename_jpg, "wb") as f:
+                f.write(self.current_img_data)
+            print(f"\n   FILE SAVED: {filename_jpg}")
+            
+            # Save to "save_data" folder as requested
+            save_data_dir = os.path.join(os.path.dirname(__file__), "save_data")
+            if not os.path.exists(save_data_dir):
+                os.makedirs(save_data_dir)
+            
+            backup_path = os.path.join(save_data_dir, f"img_{timestamp}.jpg")
+            with open(backup_path, "wb") as f:
+                f.write(self.current_img_data)
+            print(f"   BACKUP SAVED: {backup_path}")
+            
+        except Exception as e:
+            print(f"Error saving file: {e}")
+
+        # Stats
+        end_time = time.time()
+        duration = end_time - self.start_time
+        total_bytes = len(self.current_img_data)
+        speed = (total_bytes / 1024) / duration if duration > 0 else 0.0
+        
+        stats_msg = f"⏱️ Time: {duration:.2f}s | 💾 Size: {total_bytes/1024:.2f} KB | 🚀 Speed: {speed:.2f} KB/s"
+        print(f"\n   ✅ Download Finished! {stats_msg}")
+        
+        # Update Dashboard with Final Stats
+        self.dash_state["img_status_text"] = f"DONE - {duration:.1f}s @ {speed:.1f}KB/s"
+        self.update_json_state()
+
+        if self.expected_size > 0:
+            loss = 100 * (1 - len(self.current_img_data) / self.expected_size)
+            if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
+        
+        # Integrity Check
+        calc_crc = zlib.crc32(self.current_img_data) & 0xFFFFFFFF
+        if calc_crc == self.expected_crc:
+                print(f"   ✅ Integrity Verified (CRC: {calc_crc:08X})")
+        else:
+                print(f"   ❌ Integrity Mismatch! (Exp {self.expected_crc:08X} != Act {calc_crc:08X})")
+
+        self.downloading = False
+        sys.stdout.write("GS> ")
+        sys.stdout.flush()
+
+    def update_json_state(self):
+        """Writes current state to JSON for web UI."""
+        self.dash_state["last_seen"] = time.time()
+        try:
+            path = os.path.join(self.dashboard.web_dir, "status.json")
+            with open(path, "w") as f:
+                json.dump(self.dash_state, f)
+        except: pass
+
+    def update_dashboard(self):
+        """Updates live.jpg for the dashboard."""
+        self.update_json_state() # Sync JSON
+        
+        if not self.current_img_data: return
+        
+        jpg_path = os.path.join(self.dashboard.web_dir, "live.jpg")
+        tmp_path = jpg_path + ".tmp"
+        
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(self.current_img_data)
+            
+            # Atomic swap to prevent read errors
+            # On Windows, replace might raise error if target open? 
+            # But replace is atomic if possible. 
+            # If target exists and is locked, replace fails.
+            # Retry logic? Or just skip update.
+            os.replace(tmp_path, jpg_path)
+            
+        except Exception:
+            try: os.remove(tmp_path)
+            except: pass
+
+    def process_log_line(self, text):
+        """Parses ASCII log lines."""
+        if not text: return
+        
+        # Add to dashboard logs (keep last 20)
+        timestamp = time.strftime("%H:%M:%S")
+        self.dash_state["logs"].append(f"[{timestamp}] {text}")
+        if len(self.dash_state["logs"]) > 20:
+             self.dash_state["logs"].pop(0)
+        self.update_json_state()
+        
+        if "Download Complete!" in text:
+            # Reconstruct Full Image
+            if hasattr(self, 'image_chunks') and self.image_chunks:
+                max_chunk = max(self.image_chunks.keys())
+                total_len = (max_chunk * 64) + len(self.image_chunks[max_chunk])
+                self.current_img_data = bytearray(total_len)
+                for cid, data in self.image_chunks.items():
+                    offset = cid * 64
+                    end = offset + len(data)
+                    self.current_img_data[offset:end] = data
+
+            # Save raw JPG
+            timestamp = int(time.time())
+            filename_jpg = os.path.join(DOWNLOAD_DIR, f"img_{timestamp}.jpg")
+            
+            with open(filename_jpg, "wb") as f:
+                f.write(self.current_img_data)
+            
+            # Stats
+            end_time = time.time()
+            duration = end_time - self.start_time
+            total_bytes = len(self.current_img_data)
+            speed = (total_bytes / 1024) / duration if duration > 0 else 0.0
+            
+            stats_msg = f"⏱️ Time: {duration:.2f}s | 💾 Size: {total_bytes/1024:.2f} KB | 🚀 Speed: {speed:.2f} KB/s"
+            print(f"\n   ✅ Download Finished! {stats_msg}")
+            
+            # Update Dashboard with Final Stats
+            self.dash_state["img_status_text"] = f"DONE - {duration:.1f}s @ {speed:.1f}KB/s"
+            self.update_json_state()
+
+            if self.expected_size > 0:
+                loss = 100 * (1 - len(self.current_img_data) / self.expected_size)
+                if loss > 0: print(f"   ⚠️ Data Loss: {loss:.1f}%")
+            
+            # Integrity Check
+            calc_crc = zlib.crc32(self.current_img_data) & 0xFFFFFFFF
+            if calc_crc == self.expected_crc:
+                 print(f"   ✅ Integrity Verified (CRC: {calc_crc:08X})")
+            else:
+                 print(f"   ❌ Integrity Mismatch! (Exp {self.expected_crc:08X} != Act {calc_crc:08X})")
+
+            self.downloading = False
+            sys.stdout.write("GS> ")
+            sys.stdout.flush()
+
+        # 3. Standard Logs
+        else:
+            if not self.downloading:
+                # Move to start of line to overwrite 'GS> ' if it's there
+                sys.stdout.write("\r") 
+                
+                prefix = "   " 
+                
+                # Avoid double prefix if OBC already sent it
+                if text.startswith("[OBC]") or text.startswith("[VR]"):
+                    print(f"{prefix}{text}")
+                else:
+                    print(f"{prefix}[OBC] {text}")
+                
+                # Restore Prompt visually so user knows they can type
+                # Heuristic: Only show prompt if we are likely done with the sequence
+                if "GS CMD:" not in text or "Ping" in text:
+                    sys.stdout.write("GS> ")
+                    sys.stdout.flush()
+
+    def print_progress(self):
+        """Prints a simple progress bar."""
+        if not self.downloading: return
+        
+        if hasattr(self, 'image_chunks'):
+             current_len = len(self.image_chunks) * 64
+        else:
+             current_len = len(self.current_img_data)
+        
+        elapsed = time.time() - self.start_time
+        speed = (current_len / 1024) / elapsed if elapsed > 0.5 else 0.0
+        
+        if self.expected_size > 0:
+            pct = (current_len / self.expected_size) * 100.0
+            
+            # Progress Bar [=======>....]
+            bar_len = 10
+            filled = int(bar_len * current_len // self.expected_size)
+            bar = '█' * filled + '-' * (bar_len - filled)
+            
+            output = f"   Downloading: [{bar}] {pct:.1f}% | {current_len/1024:.1f} KB | {speed:.1f} KB/s   "
+            print(f"\r{output}", end='', flush=True)
+
+if __name__ == "__main__":
+    gs = GroundStation(PC_PORT, BAUDRATE)
+    gs.start() 

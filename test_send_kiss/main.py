@@ -33,6 +33,9 @@ current_filename = ""
 available_files = [] # List of filenames from List response
 last_chunk_time = 0
 running = True
+window_mode = False
+window_counter = 0
+last_saved_chunk_time = 0
 
 def send_command_12(ser):
     print("Sending Command 0x12...")
@@ -51,9 +54,11 @@ def send_command_12(ser):
     ser.write(frame)
 
 def send_command_start_file(ser, filename="01261311.jpg"):
+    global window_mode
     print(f"Sending Command Start File (0x00 0x13) + File: {filename}...")
     cmd = 0x00
     sub_cmd = 0x13
+    window_mode = False # Legacy mode
     
     # Encode and pad/truncate to exactly 12 bytes
     fname_bytes = filename.encode('utf-8')
@@ -76,6 +81,30 @@ def send_command_start_file(ser, filename="01261311.jpg"):
     
     ser.write(frame)
 
+def send_command_windowed_start(ser, filename="01261311.jpg"):
+    global window_mode, window_counter
+    print(f"Sending Windowed Start (0x00 0x12) + File: {filename}...")
+    cmd = 0x00
+    sub_cmd = 0x12
+    
+    fname_bytes = filename.encode('utf-8')
+    if len(fname_bytes) > 12:
+        fname_bytes = fname_bytes[:12]
+    elif len(fname_bytes) < 12:
+        fname_bytes = fname_bytes + b'\x00' * (12 - len(fname_bytes))
+    
+    crc_data = bytes([cmd, sub_cmd]) + fname_bytes
+    crc = KISSProtocol.calculate_crc(crc_data)
+    print(f"CMD: {hex(cmd)} {hex(sub_cmd)}, File: {filename}, CRC: {hex(crc)}")
+    
+    payload = bytes([sub_cmd]) + fname_bytes + struct.pack('<I', crc)
+    frame = KISSProtocol.wrap_frame(payload, cmd)
+    print(f"Sending Packet: {frame.hex().upper()}")
+    
+    ser.write(frame)
+    window_mode = True
+    window_counter = 0
+
 def send_command_list_files(ser):
     print("Sending Command List Files (0x00 0x10)...")
     cmd = 0x00
@@ -93,6 +122,17 @@ def send_command_list_files(ser):
     print(f"Sending Packet: {frame.hex().upper()}")
     ser.write(frame)
 
+def send_ack(ser):
+    cmd = 0x00
+    sub_cmd = 0xAC
+    crc_data = bytes([cmd, sub_cmd])
+    crc = KISSProtocol.calculate_crc(crc_data)
+    
+    payload = bytes([sub_cmd]) + struct.pack('<I', crc)
+    frame = KISSProtocol.wrap_frame(payload, cmd)
+    # print(f"[TX] ACK Sent: {frame.hex().upper()}")
+    ser.write(frame)
+
 def save_image():
     global image_chunks, current_filename
     if not image_chunks: return
@@ -107,10 +147,11 @@ def save_image():
             f.write(image_chunks[cid])
             
     print(f"[SUCCESS] Saved {filename} ({os.path.getsize(filename)} bytes)\n")
-    image_chunks.clear()
+    # Do NOT clear image_chunks here to strictly overwrite file with growing data.
+    # image_chunks.clear() 
 
-def process_frame(frame):
-    global current_filename, last_chunk_time, image_chunks, available_files
+def process_frame(ser, frame):
+    global current_filename, last_chunk_time, image_chunks, available_files, window_mode, window_counter
     
     result = KISSProtocol.unwrap_frame(frame)
     if not result: return
@@ -124,20 +165,40 @@ def process_frame(frame):
     # Image Chunk Handling (CMD=0x00, SubCMD=0x13)
     if cmd == 0x00 and len(payload) > 17 and payload[0] == 0x13:
         try:
-            chunk_id = struct.unpack('<I', payload[1:5])[0]
-            fname = payload[5:17].decode('utf-8', errors='ignore').strip('\x00')
-            
-            data_len = len(payload) - 17 - 4
-            data = payload[17:17+data_len]
-            
-            if current_filename != fname and fname:
-                if image_chunks: 
-                     save_image()
-                current_filename = fname
-                print(f"\n[START] Receving File: {fname}")
+            # Check Protocol Mode
+            if window_mode:
+                # Format: [13] [Name 12] [ID 4] [Data...] [CRC 4]
+                fname = payload[1:13].decode('utf-8', errors='ignore').strip('\x00')
+                chunk_id = struct.unpack('<I', payload[13:17])[0]
+                data_start = 17
+            else:
+                # Legacy Format: [13] [ID 4] [Name 12] [Data...] [CRC 4]
+                chunk_id = struct.unpack('<I', payload[1:5])[0]
+                fname = payload[5:17].decode('utf-8', errors='ignore').strip('\x00')
+                data_start = 17
 
-            image_chunks[chunk_id] = data
+            data_len = len(payload) - data_start - 4
+            data = payload[data_start:data_start+data_len]
+            
+            if current_filename != fname:
+                if image_chunks: 
+                     save_image() # Save previous file final state
+                     image_chunks.clear() # Clear for new file
+                     window_counter = 0
+                current_filename = fname
+                if fname: print(f"\n[START] Receving File: {fname}")
+
+            if chunk_id not in image_chunks:
+                image_chunks[chunk_id] = data
+                
             last_chunk_time = time.time()
+            
+            # Count for ACK
+            if window_mode:
+                window_counter += 1
+                if window_counter >= 10:
+                    send_ack(ser)
+                    window_counter = 0
             
             if chunk_id % 10 == 0:
                 sys.stdout.write(f"\rRx Chunk: {chunk_id}, Bytes: {len(data)}   ")
@@ -185,7 +246,7 @@ def process_frame(frame):
             print(f"[STM32 DATA]: {payload.hex().upper()}")
 
 def serial_listener(ser):
-    global rx_buffer, last_chunk_time, running
+    global rx_buffer, last_chunk_time, running, last_saved_chunk_time
     
     while running:
         try:
@@ -204,7 +265,7 @@ def serial_listener(ser):
                         try:
                              next_fend = rx_buffer.index(KISSProtocol.FEND, 1)
                              frame = rx_buffer[0:next_fend+1]
-                             process_frame(frame)
+                             process_frame(ser, frame)
                              del rx_buffer[0:next_fend] 
                         except ValueError:
                             break
@@ -212,8 +273,14 @@ def serial_listener(ser):
                         del rx_buffer[0:fend_idx]
             
             # Check Timeout (Auto-save)
-            if image_chunks and (time.time() - last_chunk_time > 2.0):
+            # Only save if:
+            # 1. We have data (image_chunks)
+            # 2. Enough time has passed since last data (2.0s)
+            # 3. We haven't already saved this state (last_chunk_time != last_saved_chunk_time)
+            if image_chunks and (time.time() - last_chunk_time > 2.0) and (last_chunk_time != last_saved_chunk_time):
                 save_image()
+                last_saved_chunk_time = last_chunk_time
+                print("\n[READY] Transfer complete. Enter next command:")
             
             time.sleep(0.005)
         except Exception as e:
@@ -234,8 +301,9 @@ def main():
         while True:
             print("\nCommands:")
             print("1. Send C0 12 xx xx xx xx C0 (Forward to USB)")
-            print("2. Send 0x00 0x13 (Start File Transfer - Default)")
-            print("3. Send 0x00 0x10 (List Files & Select)")
+            print("2. Send 0x00 0x13 (Start File Transfer - Legacy)")
+            print("3. Send 0x00 0x10 (List Files)")
+            print("4. Send 0x00 0x12 (Start Windowed Transfer)")
             print("q. Quit")
             
             choice = input("Enter choice: ").strip()
@@ -245,6 +313,7 @@ def main():
             elif choice == '2':
                 send_command_start_file(ser)
             elif choice == '3':
+                # List Files Logic (Same as before)
                 available_files = [] # Clear
                 send_command_list_files(ser)
                 print("Waiting for file list...")
@@ -258,10 +327,7 @@ def main():
                     time.sleep(0.1)
                 
                 if msg_received:
-                    # Give a moment for printing to finish
                     time.sleep(0.5) 
-                    
-                    # Prompt for selection immediately
                     while True:
                         sel = input(f"Enter File # to download (1-{len(available_files)}, q to cancel): ").strip()
                         if sel.lower() == 'q':
@@ -270,7 +336,8 @@ def main():
                             idx = int(sel)
                             if 1 <= idx <= len(available_files):
                                 target = available_files[idx-1]
-                                send_command_start_file(ser, target)
+                                print(f"Requesting '{target}' using Windowed Transfer (0x12)...")
+                                send_command_windowed_start(ser, target)
                                 break
                             else:
                                 print("Invalid number.")
@@ -279,6 +346,9 @@ def main():
                 else:
                     print("No response or empty list.")
 
+            elif choice == '4':
+                 send_command_windowed_start(ser)
+                 
             elif choice.lower() == 'q':
                 running = False
                 break

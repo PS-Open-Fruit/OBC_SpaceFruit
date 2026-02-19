@@ -428,3 +428,93 @@ void SD_ListFiles_KISS(void) {
     HAL_UART_Transmit(&hlpuart1, encoded_buffer, encoded_len, 2000);
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14); // Toggle activity LED
 }
+
+void SD_SendFile_Windowed(char *filename) {
+    extern volatile uint8_t flag_ack_received;
+    FIL file;
+    FRESULT res;
+    UINT bytesRead;
+    static uint8_t buffer[64];
+    static uint8_t packet_buffer[256];
+    static uint8_t encoded_buffer[512];
+    uint32_t chunk_id = 0;
+    
+    // Open File
+    res = f_open(&file, filename, FA_READ);
+    if (res != FR_OK) {
+        printf("Error opening %s\r\n", filename);
+        return;
+    }
+    
+    uint32_t file_size = f_size(&file);
+    uint32_t total_chunks = (file_size + 63) / 64;
+    
+    while(chunk_id < total_chunks) {
+        uint32_t start_chunk = chunk_id;
+        uint32_t send_count = 0;
+        
+        // Send Window (10 packets)
+        for(int i=0; i<10 && chunk_id < total_chunks; i++) {
+             // Read Data
+             f_lseek(&file, chunk_id * 64);
+             res = f_read(&file, buffer, 64, &bytesRead);
+             if(res != FR_OK || bytesRead == 0) break;
+             
+             // Construct Packet
+             uint16_t idx = 0;
+             packet_buffer[idx++] = 0x00; // KISS CMD
+             packet_buffer[idx++] = 0x13; // SubCMD (Data)
+             
+             // Filename (12 bytes)
+             memset(&packet_buffer[idx], 0, 12);
+             // Ensure filename fits 12 chars
+             strncpy((char*)&packet_buffer[idx], filename, 12);
+             idx += 12;
+             
+             // ID (4 bytes) - SectorID
+             memcpy(&packet_buffer[idx], &chunk_id, 4);
+             idx += 4;
+             
+             // Data (bytesRead, usually 64, last might be less)
+             memcpy(&packet_buffer[idx], buffer, bytesRead);
+             idx += bytesRead;
+             
+             // CRC
+             OBC_Packet_Init(&hcrc);
+             __HAL_CRC_DR_RESET(&hcrc);
+             uint32_t crc = OBC_Calculate_CRC(packet_buffer, idx);
+             memcpy(&packet_buffer[idx], &crc, 4);
+             idx += 4;
+             
+             // Encode & Send
+             uint16_t enc_len = SLIP_Encode(packet_buffer, idx, encoded_buffer);
+             HAL_UART_Transmit(&hlpuart1, encoded_buffer, enc_len, 1000);
+             
+             chunk_id++;
+             send_count++;
+             HAL_Delay(10); // Small delay between packets
+             HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+        }
+        
+        // Wait for ACK
+        uint32_t timeout = HAL_GetTick() + 2000; // 2s timeout
+        uint8_t ack = 0;
+        while(HAL_GetTick() < timeout) {
+            if(flag_ack_received) {
+                ack = 1;
+                flag_ack_received = 0;
+                break;
+            }
+        }
+        
+        if(!ack) {
+             // Retransmit
+             printf("Timeout! Resending window from ID %lu\r\n", start_chunk);
+             chunk_id = start_chunk; // Rewind ID
+             // Loop continues, will re-seek and re-send
+        }
+    }
+    
+    f_close(&file);
+    printf("Transfer Complete!\r\n");
+}

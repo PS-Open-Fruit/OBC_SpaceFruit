@@ -59,6 +59,8 @@ uint8_t decoded_buffer[MAX_FRAME_SIZE];
 uint16_t rx_index = 0;
 volatile uint8_t flag_send_file = 0;
 volatile uint8_t flag_list_files = 0;
+volatile uint8_t flag_req_file_windowed = 0;
+volatile uint8_t flag_ack_received = 0;
 char file_to_send[13] = "01261311.jpg";
 /* USER CODE END PV */
 
@@ -106,17 +108,29 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             
             case 0x00:
                   if (decoded_buffer[1] == 0x13) {
-                     // Extract filename if present
-                     if (decoded_len >= 14) { // 2 bytes cmd + 12 bytes filename
+                     // Legacy Request (Non-windowed)
+                     if (decoded_len >= 14) {
                         memcpy(file_to_send, &decoded_buffer[2], 12);
                         file_to_send[12] = 0;
                      }
-                     HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin); // Toggle Red LED    	  
+                     HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);   	  
                      flag_send_file = 1;
                   }
-              else if (decoded_buffer[1] == 0x10) {
-                 flag_list_files = 1;
-              }
+                  else if (decoded_buffer[1] == 0x12) {
+                     // Windowed Request
+                     if (decoded_len >= 14) {
+                        memcpy(file_to_send, &decoded_buffer[2], 12);
+                        file_to_send[12] = 0;
+                     }
+                     HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+                     flag_req_file_windowed = 1;
+                  }
+                  else if (decoded_buffer[1] == 0x10) {
+                     flag_list_files = 1;
+                  }
+                  else if (decoded_buffer[1] == 0xAC) {
+                     flag_ack_received = 1;
+                  }
               break;
             
             default:
@@ -193,6 +207,10 @@ int main(void)
       if (flag_list_files) {
           flag_list_files = 0;
           SD_ListFiles_KISS();
+      }
+      if (flag_req_file_windowed) {
+          flag_req_file_windowed = 0;
+          SD_SendFile_Windowed(file_to_send);
       }
       // SD_ListFiles_KISS();
       // HAL_Delay(1000);

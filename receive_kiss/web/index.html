@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KNACKSAT4 GS Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d0e12;
+            --panel-bg: #1a1b21;
+            --text-color: #a0a0a0;
+            --primary: #00ff41;
+            --accent: #2196f3;
+            --danger: #f44336;
+            --border: 1px solid #333;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Share Tech Mono', monospace;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: 60px 1fr;
+        }
+
+        /* HEADER */
+        header {
+            background: var(--panel-bg);
+            border-bottom: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        h1 { color: #fff; margin: 0; font-size: 24px; letter-spacing: 2px; }
+        .badge {
+            background: #333;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        .online { color: var(--bg-color); background: var(--primary); box-shadow: 0 0 10px var(--primary); }
+        .offline { color: #fff; background: var(--danger); }
+
+        /* MAIN CONTENT Grid */
+        main {
+            display: grid;
+            grid-template-columns: 1fr 450px; /* Image takes remaining, Sidebar 450px */
+            gap: 20px;
+            padding: 20px;
+            overflow: hidden; /* Prevent scrolling main container */
+        }
+
+        /* LIVE FEED */
+        .panel {
+            background: var(--panel-bg);
+            border: var(--border);
+            border-radius: 4px;
+            position: relative;
+            padding: 10px;
+        }
+
+        .image-container {
+            width: 100%;
+            height: 100%;
+            min-height: 400px;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #444;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .live-image-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: contain;
+            transition: opacity 0.1s ease-in-out;
+            opacity: 0;
+            z-index: 1;
+        }
+        .live-image-layer.active {
+            opacity: 1;
+            z-index: 2;
+        }
+
+        .scan-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 2px;
+            background: var(--primary);
+            box-shadow: 0 0 15px var(--primary);
+            animation: scan 2.5s linear infinite;
+            opacity: 0.5;
+            pointer-events: none;
+            z-index: 3;
+        }
+        @keyframes scan { 0%{top:0} 100%{top:100%} }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #333;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            transition: width 0.3s;
+        }
+
+        /* TELEMETRY SIDEBAR */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .stat-card {
+            background: #23242a;
+            padding: 15px;
+            border-left: 3px solid var(--accent);
+        }
+        .stat-card.danger { border-left-color: var(--danger); }
+        .stat-card small { display: block; font-size: 12px; margin-bottom: 5px; opacity: 0.7; }
+        .stat-value { font-size: 20px; color: #fff; }
+
+        /* LOGS PANEL */
+        .logs-panel {
+            background: #0d0e12;
+            border: 1px solid #333;
+            padding: 10px;
+            font-size: 13px;
+            overflow-y: auto;
+            color: #ccc;
+            height: 100%;
+            border-radius: 4px;
+        }
+        .log-entry { margin: 2px 0; border-bottom: 1px solid #222; }
+        .log-entry:last-child { color: #fff; font-weight: bold; }
+
+        /* BUTTONS */
+        .btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px 15px;
+            font-family: inherit;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: 0.2s;
+        }
+        .btn:hover { background: #444; border-color: #777; }
+        .btn:active { background: #222; }
+        .btn-primary { background: #1b5e20; border-color: #2e7d32; }
+        .btn-primary:hover { background: #2e7d32; border-color: #4caf50; }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <h1>🛰️ KNACKSAT4 GS</h1>
+            <span id="conn-badge" class="badge">CONNECTING...</span>
+        </div>
+        
+        <!-- CONTROL BAR -->
+        <div style="display:flex; gap: 10px;">
+            <button onclick="sendCommand('status')" class="btn">📡 STATUS</button>
+            <button onclick="sendCommand('ping')" class="btn">⚡ PING</button>
+            <button onclick="sendCommand('capture')" class="btn btn-primary">📸 CAPTURE</button>
+        </div>
+
+        <div>
+            <span style="margin-right:20px">PKTS: <span id="pkt-count" style="color:#fff">0</span></span>
+            <span id="clock">00:00:00 UTC</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- LEFT: IMAGING -->
+        <div class="panel" style="display:flex; flex-direction:column;">
+            <div style="margin-bottom:10px; display:flex; justify-content:space-between;">
+                <span>📷 MISSION IMAGING</span>
+                <span id="img-status">ID: #0 - WAIT</span>
+            </div>
+            
+            <div class="image-container">
+                <div class="scan-overlay"></div>
+                <!-- live-image: fit contain to ensure full image visibility without scrolling -->
+                <img id="live-image" src="placeholder.png" style="object-fit: contain; width: 100%; height: 100%;" onerror="this.style.display='none'">
+                <div id="no-signal" style="position:absolute; color:#333;">NO SIGNAL</div>
+            </div>
+
+            <div class="progress-bar">
+                <div id="img-progress" class="progress-fill"></div>
+            </div>
+        </div>
+
+        <!-- RIGHT: SIDEBAR (Telemetry + Logs) -->
+        <div style="display:flex; flex-direction:column; gap:20px; height:100%; overflow:hidden;">
+            
+            <!-- TELEMETRY -->
+            <div class="panel" style="flex-shrink: 0;">
+                <h3 style="margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">📊 VR TELEMETRY</h3>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <small>CPU LOAD</small>
+                        <div id="vr-cpu" class="stat-value">0%</div>
+                    </div>
+                    <div class="stat-card">
+                        <small>TEMPERATURE</small>
+                        <div id="vr-temp" class="stat-value">0 °C</div>
+                    </div>
+                    <div class="stat-card">
+                        <small>RAM FREE</small>
+                        <div id="vr-ram" class="stat-value">0 MB</div>
+                    </div>
+                    <div class="stat-card">
+                        <small>DISK FREE</small>
+                        <div id="vr-disk" class="stat-value">0 MB</div>
+                    </div>
+                    <div class="stat-card" style="grid-column: span 2;">
+                        <small>UPTIME</small>
+                        <div id="vr-uptime" class="stat-value">0h 0m</div>
+                    </div>
+                    <div class="stat-card" style="grid-column: span 2;">
+                        <small>SYSTEM HEALTH</small>
+                        <div id="vr-health" class="stat-value" style="font-size:16px;">OK</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PACKET INSPECTOR -->
+            <div class="panel" style="flex-shrink: 0;">
+                <h3 style="margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">🔍 PACKET INSPECTOR</h3>
+                <div style="font-size: 14px; line-height: 1.6;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span>TYPE:</span> <span id="pkt-type" style="color:#fff">-</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span>SECTOR ID:</span> <span id="pkt-sector" style="color:#fff">-</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span>FILENAME:</span> <span id="pkt-file" style="color:#fff">-</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span>CRC STATUS:</span> <span id="pkt-crc" class="badge" style="padding:2px 6px; font-size:12px;">WAIT</span>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <span style="opacity:0.7; font-size:12px;">RAW HEX (Preview):</span>
+                        <div id="pkt-hex" style="background:#111; padding:5px; font-size:10px; word-break:break-all; color:#0f0; font-family:'Courier New'; margin-top:2px; border:1px solid #333;">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LOGS -->
+            <div class="logs-panel" id="logs-container" style="flex-grow: 1;">
+                <!-- JS fills this -->
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').innerText = now.toUTCString().split(' ')[4] + ' UTC';
+        }
+        setInterval(updateClock, 1000);
+
+        async function sendCommand(cmd) {
+            console.log("Sending cmd:", cmd);
+            try {
+                await fetch('/api/command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command: cmd})
+                });
+            } catch(e) { console.error("Cmd error", e); }
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('status.json?nocache=' + Date.now());
+                const data = await res.json();
+                
+                // 1. Connection Header
+                const badge = document.getElementById('conn-badge');
+                if(data.connection === 'ONLINE') {
+                    if (badge.className !== 'badge online') {
+                        // Just Connected: Reset Image
+                        const im1 = document.getElementById('live-image-1');
+                        const im2 = document.getElementById('live-image-2');
+                        if(im1) { im1.src = 'placeholder.png'; im1.classList.remove('active'); }
+                        if(im2) { im2.src = 'placeholder.png'; im2.classList.remove('active'); }
+                        // Set 1 active by default? or hidden?
+                        // If we remove active from both, they are invisible.
+                        // Let's set 1 active but placeholder.
+                        if(im1) im1.classList.add('active');
+                        
+                        document.getElementById('img-progress').style.width = '0%';
+                        document.getElementById('img-status').innerText = "ID: # - 0 Bytes";
+                    }
+                    badge.className = 'badge online';
+                    badge.innerText = 'LINK ESTABLISHED';
+                } else {
+                    badge.className = 'badge offline';
+                    badge.innerText = 'NO SIGNAL';
+                }
+                
+                document.getElementById('pkt-count').innerText = data.packet_count;
+
+                // 2. VR Telemetry
+                if(data.vr_status) {
+                    const vr = data.vr_status;
+                    document.getElementById('vr-cpu').innerText = vr.cpu + '%';
+                    document.getElementById('vr-temp').innerText = vr.temp + ' °C';
+                    
+                    // Color code temp
+                    const tempEl = document.getElementById('vr-temp').parentElement;
+                    tempEl.style.borderLeftColor = vr.temp > 60 ? '#f44336' : '#2196f3';
+
+                    document.getElementById('vr-ram').innerText = vr.ram + ' MB';
+                    document.getElementById('vr-disk').innerText = vr.disk + ' MB';
+                    
+                    const h = Math.floor(vr.uptime / 3600);
+                    const m = Math.floor((vr.uptime % 3600) / 60);
+                    document.getElementById('vr-uptime').innerText = `${h}h ${m}m`;
+                    document.getElementById('vr-health').innerText = vr.health;
+                }
+
+                // 3. Image Progress
+                if(data.img_status_text) {
+                     document.getElementById('img-status').innerText = `ID: #${data.img_id} | ${data.img_status_text}`;
+                     document.getElementById('img-status').style.color = "#0f0";
+                } else {
+                     document.getElementById('img-status').innerText = `ID: #${data.img_id} - ${data.img_size} Bytes`;
+                     document.getElementById('img-status').style.color = "#a0a0a0";
+                }
+                document.getElementById('img-progress').style.width = data.img_progress + '%';
+
+                // 4. Packet Inspector
+                if(data.last_packet) {
+                    const pkt = data.last_packet;
+                    document.getElementById('pkt-type').innerText = pkt.type;
+                    document.getElementById('pkt-sector').innerText = pkt.sector_id;
+                    document.getElementById('pkt-file').innerText = pkt.filename;
+                    document.getElementById('pkt-hex').innerText = pkt.hex;
+                    
+                    const crcBadge = document.getElementById('pkt-crc');
+                    const crcText = pkt.crc_ok ? "PASS" : "FAIL";
+                    const crcColor = pkt.crc_ok ? "#2e7d32" : "#c62828";
+                    
+                    if (crcBadge.innerText !== crcText) crcBadge.innerText = crcText;
+                    if (crcBadge.style.backgroundColor !== crcColor) crcBadge.style.backgroundColor = crcColor;
+                }
+
+                // 5. Logs
+                const logContainer = document.getElementById('logs-container');
+                let newLogsHTML = '';
+                data.logs.forEach(line => {
+                    newLogsHTML += `<div class="log-entry">${line}</div>`;
+                });
+                
+                if (logContainer.innerHTML !== newLogsHTML) {
+                    logContainer.innerHTML = newLogsHTML;
+                    // Auto Scroll only if at bottom or new data?
+                    logContainer.scrollTop = logContainer.scrollHeight;
+                }
+
+            } catch(e) { console.error("Poll error", e); }
+        }
+
+        // Live Image Refresh - Double Buffer
+        let activeBuffer = 1;
+
+        function refreshImage() {
+            const backBuffer = activeBuffer === 1 ? 2 : 1;
+            const frontEl = document.getElementById('live-image-' + activeBuffer);
+            const backEl = document.getElementById('live-image-' + backBuffer);
+            if (!frontEl || !backEl) return;
+            
+            const newSrc = 'live.jpg?t=' + Date.now();
+            const temp = new Image();
+            
+            temp.onload = function() {
+                backEl.src = newSrc;
+                // Swap
+                backEl.classList.add('active');
+                frontEl.classList.remove('active');
+                activeBuffer = backBuffer;
+                
+                const noSig = document.getElementById('no-signal');
+                if(noSig) noSig.style.display = 'none';
+            }
+            temp.src = newSrc;
+        }
+
+        setInterval(fetchStatus, 500); // 2Hz Telemetry
+        setInterval(refreshImage, 500); // 2Hz Image
+
+    </script>
+</body>
+</html>
