@@ -25,7 +25,9 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-#include "../../SD_SPI/sd_utils.h"
+#include "sd_utils.h"
+#include "usbd_cdc_if.h"
+#include "obc_packet.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,7 +53,11 @@ UART_HandleTypeDef hlpuart1;
 SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
-
+uint8_t rx_byte;
+uint8_t rx_buffer[MAX_FRAME_SIZE];
+uint8_t decoded_buffer[MAX_FRAME_SIZE];
+uint16_t rx_index = 0;
+volatile uint8_t flag_send_file = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,13 +68,68 @@ static void MX_SPI1_Init(void);
 static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 void SD_ListFiles(void);
-void SD_SendFile(char *filename);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == LPUART1)
+  {
+    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
+    // Prevent overflow
+    if (rx_index < MAX_FRAME_SIZE) {
+        rx_buffer[rx_index++] = rx_byte;
+    } else {
+        rx_index = 0; // Reset on overflow
+        rx_buffer[rx_index++] = rx_byte;
+    }
+
+    if (rx_byte == FEND)
+    {
+      if (rx_index > 1) 
+      {
+          uint16_t frame_len = rx_index;
+          uint16_t decoded_len = SLIP_Decode(rx_buffer, frame_len, decoded_buffer); 
+          
+          switch (decoded_buffer[0])
+          {
+            case 0x12:
+              HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin); // Toggle Red LED
+              CDC_Transmit_FS(rx_buffer, frame_len);
+              break;
+            
+            case 0x00:
+              if (decoded_buffer[1] == 0x13) {   
+                 HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin); // Toggle Red LED    	  
+                //  SD_SendFile("01261311.jpg",0x0010);
+                 printf("VR should be sent data to save in SD card\r\n");
+				 printf("Data: ");
+				 for(int i=0; i<decoded_len; i++) {
+					 printf("%02X ", decoded_buffer[i]);
+				 }
+				 printf("\r\n");
+              }
+              break;
+            
+            default:
+              break;
+          }
+           rx_index = 0;
+      }
+      else
+      {
+          // Start FEND or repeated FEND
+          rx_buffer[0] = FEND;
+          rx_index = 1;
+      }
+    }
+    HAL_UART_Receive_IT(&hlpuart1, &rx_byte, 1);
+  }
+}
 /* USER CODE END 0 */
 
 /**
@@ -106,12 +167,14 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_CRC_Init();
   /* USER CODE BEGIN 2 */
-  // HAL_Delay(1000); // Wait for system to settle
-  // SD_ListFiles();
+  HAL_NVIC_SetPriority(LPUART1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(LPUART1_IRQn);
+  HAL_UART_Receive_IT(&hlpuart1, &rx_byte, 1);
 
-  // Send specific file
-  printf("Sending file: 01261311.JPG...\r\n");
-  SD_SendFile("01261311.JPG");
+  SD_Init();
+
+  // HAL_Delay(1000); // Wait for system to settle 
+  
 
   /* USER CODE END 2 */
 
@@ -119,6 +182,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      SD_SaveFiles();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -204,8 +268,8 @@ static void MX_CRC_Init(void)
   hcrc.Instance = CRC;
   hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
   hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
-  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
-  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_BYTE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_ENABLE;
   hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
   if (HAL_CRC_Init(&hcrc) != HAL_OK)
   {

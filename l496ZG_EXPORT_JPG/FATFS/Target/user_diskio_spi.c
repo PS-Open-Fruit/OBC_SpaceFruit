@@ -320,7 +320,7 @@ BYTE send_cmd (		/* Return value: R1 resp (bit7==1:Failed to send) */
 /* Initialize disk drive                                                 */
 /*-----------------------------------------------------------------------*/
 
-#include <stdio.h> /* For printf debugging */
+
 
 inline DSTATUS USER_SPI_initialize (
 	BYTE drv		/* Physical drive number (0) */
@@ -331,7 +331,10 @@ inline DSTATUS USER_SPI_initialize (
 	if (drv != 0) return STA_NOINIT;		/* Supports only drive 0 */
 	//assume SPI already init init_spi();	/* Initialize SPI */
 
-	if (Stat & STA_NODISK) return Stat;	/* Is card existing in the soket? */
+	if (Stat & STA_NODISK) {
+		printf("SD Init: STA_NODISK is set.\r\n");
+		return Stat;	/* Is card existing in the soket? */
+	}
 
 	FCLK_SLOW();
 	for (n = 10; n; n--) xchg_spi(0xFF);	/* Send 80 dummy clocks */
@@ -339,56 +342,61 @@ inline DSTATUS USER_SPI_initialize (
 	ty = 0;
 	BYTE res_cmd0 = send_cmd(CMD0, 0);
 	if (res_cmd0 == 1) {			/* Put the card SPI/Idle state */
-		printf("SD: CMD0 Success. Card in Idle State.\r\n");
+		printf("SD Init: CMD0 OK\r\n");
+
 		HAL_Delay(100); /* Wait for card to stabilize */
 		SPI_Timer_On(1000);					/* Initialization timeout = 1 sec */
 		BYTE res_cmd8 = send_cmd(CMD8, 0x1AA);
 		if (res_cmd8 == 1) {	/* SDv2? */
-			printf("SD: CMD8 Success. SDv2 Card.\r\n");
+			printf("SD Init: CMD8 OK (SDv2)\r\n");
+
 			for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);	/* Get 32 bit return value of R7 resp */
 			if (ocr[2] == 0x01 && ocr[3] == 0xAA) {				/* Is the card supports vcc of 2.7-3.6V? */
-				printf("SD: VCC Check Success.\r\n");
+
 				while (SPI_Timer_Status() && send_cmd(ACMD41, 1UL << 30)) ;	/* Wait for end of initialization with ACMD41(HCS) */
 				if (SPI_Timer_Status() && send_cmd(CMD58, 0) == 0) {		/* Check CCS bit in the OCR */
 					for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);
 					ty = (ocr[0] & 0x40) ? CT_SD2 | CT_BLOCK : CT_SD2;	/* Card id SDv2 */
-					printf("SD: Init Success. Card Type: %d\r\n", ty);
+					printf("SD Init: SDv2 Init OK. Type: %d\r\n", ty);
+
 				} else {
-					printf("SD: ACMD41 or CMD58 Failed.\r\n");
+					printf("SD Init: CMD58 Failed or Timeout\r\n");
 				}
 			} else {
-				printf("SD: VCC Check Failed. OCR[2]=%02X OCR[3]=%02X\r\n", ocr[2], ocr[3]);
+				printf("SD Init: VCC check failed (OCR: %02X %02X)\r\n", ocr[2], ocr[3]);
 			}
 		} else {	/* Not SDv2 card */
-			printf("SD: CMD8 Failed (Ret: %02X). Not SDv2. Trying SDv1/MMC.\r\n", res_cmd8);
+			printf("SD Init: CMD8 Failed (%d), trying SDv1/MMC\r\n", res_cmd8);
 			
 			BYTE res_acmd41 = send_cmd(ACMD41, 0);
-			printf("SD: ACMD41(0) Ret: %02X\r\n", res_acmd41);
+
 
 			if (res_acmd41 <= 1) 	{	/* SDv1 or MMC? */
 				ty = CT_SD1; cmd = ACMD41;	/* SDv1 (ACMD41(0)) */
-				printf("SD: Trying SDv1 Init (ACMD41)...\r\n");
+				printf("SD Init: Detected SDv1\r\n");
+
 			} else {
 				ty = CT_MMC; cmd = CMD1;	/* MMCv3 (CMD1(0)) */
-				printf("SD: Trying MMC Init (CMD1)...\r\n");
+				printf("SD Init: Detected MMC\r\n");
+
 			}
 			
 			while (SPI_Timer_Status() && send_cmd(cmd, 0)) ;		/* Wait for end of initialization */
 			
 			if (!SPI_Timer_Status()) {
-			    printf("SD: Init Loop Timeout.\r\n");
+				printf("SD Init: SDv1/MMC Init Timeout\r\n");
 			    ty = 0;
 			} else {
 			    if (send_cmd(CMD16, 512) != 0) {
-			        printf("SD: CMD16 (Set Block Len) Failed.\r\n");
+					printf("SD Init: CMD16 (Set BlockLen) Failed\r\n");
 			        ty = 0;
 			    } else {
-			        printf("SD: Legacy Init Success.\r\n");
+					printf("SD Init: SDv1/MMC Init OK\r\n");
 			    }
 			}
 		}
 	} else {
-		printf("SD: CMD0 Failed. Response: %02X\r\n", res_cmd0);
+		printf("SD Init: CMD0 Failed (Resp: 0x%02X)\r\n", res_cmd0);
 	}
 	CardType = ty;	/* Card type */
 	despiselect();

@@ -94,7 +94,14 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
+uint8_t UserRxBufferFS_A[APP_RX_DATA_SIZE];
+uint8_t UserRxBufferFS_B[APP_RX_DATA_SIZE];
 
+volatile uint8_t Buffer_A_Ready = 0; // 0: Free, 1: Ready for Main
+volatile uint8_t Buffer_B_Ready = 0; // 0: Free, 1: Ready for Main
+volatile uint32_t Buffer_A_Length = 0;
+volatile uint32_t Buffer_B_Length = 0;
+volatile uint8_t Rx_Stalled = 0;
 /* USER CODE END PRIVATE_VARIABLES */
 
 /**
@@ -154,7 +161,7 @@ static int8_t CDC_Init_FS(void)
   /* USER CODE BEGIN 3 */
   /* Set Application Buffers */
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
+  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_A);
   return (USBD_OK);
   /* USER CODE END 3 */
 }
@@ -261,8 +268,56 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+  // Determine which buffer was just filled
+  if (Buf == UserRxBufferFS_A)
+  {
+      Buffer_A_Length = *Len;
+      Buffer_A_Ready = 1;
+
+      // Check if Buffer B is available
+      if (Buffer_B_Ready == 0) // Buffer B is free
+      {
+          USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_B);
+          USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      }
+      else
+      {
+          // Buffer B is also full/busy. We cannot receive more data.
+          Rx_Stalled = 1;
+      }
+  }
+  else if (Buf == UserRxBufferFS_B)
+  {
+      Buffer_B_Length = *Len;
+      Buffer_B_Ready = 1;
+
+      // Check if Buffer A is available
+      if (Buffer_A_Ready == 0) // Buffer A is free
+      {
+          USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_A);
+          USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      }
+      else
+      {
+          // Buffer A is also full/busy.
+          Rx_Stalled = 1;
+      }
+  }
+  else
+  {
+      // Fallback/Error Condition
+      if (Buffer_A_Ready == 0)
+      {
+          USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_A);
+          USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      }
+      else if (Buffer_B_Ready == 0)
+      {
+           USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_B);
+           USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      }
+  }
+
   return (USBD_OK);
   /* USER CODE END 6 */
 }
@@ -316,7 +371,29 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
-
+void CDC_Buffer_Processed(uint8_t buffer_id)
+{
+  if (buffer_id == 0) // Buffer A Processed
+  {
+      Buffer_A_Ready = 0;
+      if (Rx_Stalled)
+      {
+          Rx_Stalled = 0;
+          USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_A);
+          USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      }
+  }
+  else if (buffer_id == 1) // Buffer B Processed
+  {
+      Buffer_B_Ready = 0;
+      if (Rx_Stalled)
+      {
+          Rx_Stalled = 0;
+          USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS_B);
+          USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+      }
+  }
+}
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 
 /**

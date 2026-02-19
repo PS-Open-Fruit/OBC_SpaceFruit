@@ -213,5 +213,9 @@ void OTG_FS_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+extern UART_HandleTypeDef hlpuart1;
+void LPUART1_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&hlpuart1);
+}
 /* USER CODE END 1 */
