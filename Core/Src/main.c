@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "fatfs.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -31,6 +32,7 @@
 #include "kiss_utils.h"
 #include "obc_helper.h"
 #include "eps_helper.h"
+#include "sd_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,12 +72,17 @@ IWDG_HandleTypeDef hiwdg;
 
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
+DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_spi2_rx;
+DMA_HandleTypeDef hdma_spi2_tx;
 
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_uart5_tx;
 
 /* Definitions for MainTask */
 osThreadId_t MainTaskHandle;
@@ -96,7 +103,7 @@ osThreadId_t wdtFeedHandle;
 const osThreadAttr_t wdtFeed_attributes = {
   .name = "wdtFeed",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityRealtime,
 };
 /* Definitions for sensorQuery */
 osThreadId_t sensorQueryHandle;
@@ -138,6 +145,11 @@ osMutexId_t sensorsMutexHandle;
 const osMutexAttr_t sensorsMutex_attributes = {
   .name = "sensorsMutex"
 };
+/* Definitions for myBinarySem01 */
+osSemaphoreId_t myBinarySem01Handle;
+const osSemaphoreAttr_t myBinarySem01_attributes = {
+  .name = "myBinarySem01"
+};
 /* Definitions for epsFlag */
 osEventFlagsId_t epsFlagHandle;
 const osEventFlagsAttr_t epsFlag_attributes = {
@@ -145,8 +157,30 @@ const osEventFlagsAttr_t epsFlag_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+
+// extern osSemaphoreId_t norTxSemaphoreHandle;
+// extern osSemaphoreId_t norRxSemaphoreHandle;
+
+osSemaphoreId_t norSemaphoreHandle;
+
+const osSemaphoreAttr_t norSemaphoreAttr = {
+  .name = "norFlashSemaphore"
+};
+
+osSemaphoreId_t sdTxSemaphoreHandle;
+osSemaphoreId_t sdRxSemaphoreHandle;
+
+const osSemaphoreAttr_t sdRxSemaphoreAttr = {
+  .name = "sdRxSemaphore"
+};
+const osSemaphoreAttr_t sdTxSemaphoreAttr = {
+  .name = "sdTxSemaphore"
+};
+
 #define COM_UART huart4
 #define EPS_UART huart2
+#define SD_SPI hspi1
+#define NOR_SPI hspi2
 
 #define EVENT_FLAG_ERROR        0x80000000U
 #define EPS_FLAG_POLL_START     0x00000001U
@@ -161,6 +195,7 @@ const osEventFlagsAttr_t epsFlag_attributes = {
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_UART5_Init(void);
@@ -216,6 +251,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_SPI1_Init();
   MX_UART4_Init();
   MX_UART5_Init();
@@ -227,6 +263,7 @@ int main(void)
   MX_I2C4_Init();
   MX_CRC_Init();
   MX_IWDG_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   // HAL_CAN_Start(&hcan2);
 
@@ -244,8 +281,15 @@ int main(void)
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
+  /* Create the semaphores(s) */
+  /* creation of myBinarySem01 */
+  myBinarySem01Handle = osSemaphoreNew(1, 1, &myBinarySem01_attributes);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
+  sdTxSemaphoreHandle = osSemaphoreNew(1,0,&sdTxSemaphoreAttr);
+  sdRxSemaphoreHandle = osSemaphoreNew(1,0,&sdRxSemaphoreAttr);
+  norSemaphoreHandle = osSemaphoreNew(1,0,&norSemaphoreAttr);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -522,11 +566,11 @@ static void MX_SPI1_Init(void)
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -759,6 +803,35 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+  /* DMA2_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -784,7 +857,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(SD_MUX_GPIO_Port, SD_MUX_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, NOR_RST_Pin|NOR_CS_Pin, GPIO_PIN_SET);
@@ -812,7 +885,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = SD_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : NOR_RST_Pin NOR_CS_Pin */
@@ -828,6 +901,38 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+extern volatile int dma_tx_done;
+extern volatile int dma_rx_done;
+
+/* USER CODE BEGIN 4 */
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
+  if (hspi->Instance == SD_SPI.Instance) {
+    osSemaphoreRelease(sdTxSemaphoreHandle);
+  }
+  else if (hspi->Instance == NOR_SPI.Instance) { // Fixed: == instead of =
+    osSemaphoreRelease(norSemaphoreHandle);
+  }
+}
+
+// ADDED: The missing Receive callback required for HAL_SPI_Receive_DMA
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
+  if (hspi->Instance == SD_SPI.Instance) {
+    osSemaphoreRelease(sdRxSemaphoreHandle);
+  }
+  else if (hspi->Instance == NOR_SPI.Instance) {
+    osSemaphoreRelease(norSemaphoreHandle);
+  }
+}
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi) {
+  if (hspi->Instance == SD_SPI.Instance) {
+    osSemaphoreRelease(sdRxSemaphoreHandle);
+  }
+  else if (hspi->Instance == NOR_SPI.Instance) { // Fixed: == instead of =
+    osSemaphoreRelease(norSemaphoreHandle);
+  }
+}
 
 /**
  * @brief  Sends a command, waits for response, validates, and decodes it.
@@ -950,19 +1055,25 @@ void mainTask(void *argument)
   mt25q_t flash = {
       .flash_spi.hspi = &hspi2,
       .flash_spi.cs_pin = cs_flash,
+      .flash_spi.spiSem = norSemaphoreHandle,
       .rst_pin = rst_flash,
   };
 
 
 
   mt25q_init(&flash);
-
   printf("Program Start\r\n");
+
+  if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
+    printf("Reset by IWDG\r\n");
+  }
   
   fs_init(&flash);
   lfs_file_t file;
+  printf("LFS Init\r\n");
   // mount the filesystem
   int err = lfs_mount(&lfs, &cfg);
+  printf("LFS Mount\r\n");
   // reformat if we can't mount the filesystem
   // this should only happen on the first boot
   if (err)
@@ -992,10 +1103,94 @@ void mainTask(void *argument)
   printf("boot_count: %ld\r\n", boot_count);
   // print the boot count
 
-  if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
-    printf("Reset by IWDG\r\n");
-  }
+  printf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
+    osDelay(1000); //a short delay is important to let the SD card settle
+
+    //some variables for FatFs
+    FATFS FatFs; 	//Fatfs handle
+    FIL fil; 		//File handle
+    FRESULT fres; //Result after operations
+
+    //Open the file system
+    fres = f_mount(&FatFs, "", 1); //1=mount now
+    if (fres != FR_OK) {
+  	printf("f_mount error (%i)\r\n", fres);
+      while(1){
+        osDelay(1);
+      }
+    }
+
+    //Let's get some statistics from the SD card
+    DWORD free_clusters, free_sectors, total_sectors;
+
+    FATFS* getFreeFs;
+
+    fres = f_getfree("", &free_clusters, &getFreeFs);
+    if (fres != FR_OK) {
+  	printf("f_getfree error (%i)\r\n", fres);
+      while(1){
+        osDelay(1);
+      }
+    }
+
+    //Formula comes from ChaN's documentation
+    total_sectors = (getFreeFs->n_fatent - 2) * getFreeFs->csize;
+    free_sectors = free_clusters * getFreeFs->csize;
+
+    printf("SD card stats:\r\n%10lu KiB total drive space.\r\n%10lu KiB available.\r\n", total_sectors / 2, free_sectors / 2);
+
+    //Now let's try to open file "test.txt"
+    fres = f_open(&fil, "test.txt", FA_READ);
+    if (fres != FR_OK) {
+  	printf("f_open error (%i)\r\n", fres);
+      while(1){
+        osDelay(1);
+      }
+    }
+    printf("I was able to open 'test.txt' for reading!\r\n");
+
+    //Read 30 bytes from "test.txt" on the SD card
+    BYTE readBuf[30];
+
+    //We can either use f_read OR f_gets to get data out of files
+    //f_gets is a wrapper on f_read that does some string formatting for us
+    TCHAR* rres = f_gets((TCHAR*)readBuf, 30, &fil);
+    if(rres != 0) {
+  	printf("Read string from 'test.txt' contents: %s\r\n", readBuf);
+    } else {
+  	printf("f_gets error (%i)\r\n", fres);
+    }
+
+    //Be a tidy kiwi - don't forget to close your file!
+    f_close(&fil);
+
+    //Now let's try and write a file "write.txt"
+    fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
+    if(fres == FR_OK) {
+  	printf("I was able to open 'write.txt' for writing\r\n");
+    } else {
+  	printf("f_open error (%i)\r\n", fres);
+    }
+
+    //Copy in a string
+    strncpy((char*)readBuf, "a new file is made!", 19);
+    UINT bytesWrote;
+    fres = f_write(&fil, readBuf, 19, &bytesWrote);
+    if(fres == FR_OK) {
+  	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
+    } else {
+  	printf("f_write error (%i)\r\n", fres);
+    }
+
+    //Be a tidy kiwi - don't forget to close your file!
+    f_close(&fil);
+
+    //We're done, so de-mount the drive
+    f_mount(NULL, "", 0);
+
+
+  osDelay(10000);
   osThreadResume(sensorQueryHandle);
   obc_sensor_data_t _obc_sensors;
   eps_sensor_data_t _eps_sensors;
@@ -1186,10 +1381,10 @@ void sensorQueryTask(void *argument)
     }
     
     
-    if (ret != hal_ok)
-    {
-      printf("Read RTC Error");
-    }
+    // if (ret != hal_ok)
+    // {
+    //   printf("Read RTC Error");
+    // }
     printf("Loops Sensor Query Runs normally\r\n");
     /* Perform VI Sensor Reads for 6 Channel */
     for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
@@ -1287,6 +1482,7 @@ void logTask(void *argument)
   for(;;)
   {
     osMessageQueueGet(printQueueHandle,&ch,NULL,osWaitForever);
+    // HAL_UART_Transmit_DMA(&huart5, (uint8_t *)&ch, 1);
     HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
     // osDelay(1);
   }
