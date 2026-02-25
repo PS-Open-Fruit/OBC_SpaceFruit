@@ -206,13 +206,13 @@ class GroundStation:
                 if cmd in ['c', 'capture']:
                     self.send_capture()
                 elif cmd in ['s', 'status']:
-                    print("📊 Requesting Status...")
+                    print("   📊 Requesting Status...")
                     self.send_kiss_command(CMD_STATUS)
                 elif cmd in ['p', 'ping']:
-                    print("🏓 Ping...")
+                    print("   🏓 Ping...")
                     self.send_kiss_command(CMD_PING)
                 elif cmd in ['q', 'quit', 'exit']:
-                    print("👋 Exiting...")
+                    print("   👋 Exiting...")
                     self.running = False
                     break
                 else:
@@ -593,7 +593,7 @@ class GroundStation:
                     "health": "OK" if throttled == 0 else "THROTTLED"
                 }
                 
-                print(f"\n📊 VR Status:")
+                print(f"\n   📊 VR Status:")
                 print(f"   CPU: {cpu}%")
                 print(f"   Temp: {temp:.1f}°C")
                 print(f"   RAM: {ram} MB")
