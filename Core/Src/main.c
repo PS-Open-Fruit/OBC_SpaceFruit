@@ -161,6 +161,9 @@ const osEventFlagsAttr_t epsFlag_attributes = {
 // extern osSemaphoreId_t norTxSemaphoreHandle;
 // extern osSemaphoreId_t norRxSemaphoreHandle;
 
+uint8_t kiss_buffer[512];
+kiss_frame_t payload_kiss;
+
 osSemaphoreId_t norSemaphoreHandle;
 
 const osSemaphoreAttr_t norSemaphoreAttr = {
@@ -268,6 +271,7 @@ int main(void)
   // HAL_CAN_Start(&hcan2);
 
   // rv3028c7_set_hour(&rtc,8);
+  payload_kiss.content = kiss_buffer;
 
   /* USER CODE END 2 */
 
@@ -1190,7 +1194,6 @@ void mainTask(void *argument)
     f_mount(NULL, "", 0);
 
 
-  osDelay(10000);
   osThreadResume(sensorQueryHandle);
   obc_sensor_data_t _obc_sensors;
   eps_sensor_data_t _eps_sensors;
@@ -1225,6 +1228,16 @@ void mainTask(void *argument)
     }
     printf("Temperature : %ld\r\n", _obc_sensors.temp);
     printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
+
+    uint8_t cmd_encoded[32] = {0};
+    uint8_t dummy = 0;
+    uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_CAPTURE,&dummy,0,KISS_CMD_DATA, cmd_encoded);
+    CDC_Transmit_FS(cmd_encoded,req_len);
+    printf("KISS Frame Encoded : ");
+    for (int i = 0; i < req_len;i++){
+      printf("0x%02X ",cmd_encoded[i]);
+    }
+    printf("\r\n");
 
     for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
       uint8_t channel = _eps_sensors.vi_sensor[i].channel;
@@ -1311,12 +1324,28 @@ void usbTask(void *argument)
     if (status == osOK)
     {
       // Data received! Process it.
-      printf("Len: %lu, Data: ", usb_data_rx.len);
+      
+      osDelay(10);
+      // osThreadSuspend(MainTaskHandle);
+      printf("Len: %lu\r\n", usb_data_rx.len);
+      // for (int i = 0; i < usb_data_rx.len; i++){
+      //   printf("0-%02X ",usb_data_rx.usb_buff[i]);
+      // }
+      // printf("\r\n");
+      uint8_t raw[32] = {0};
+      kiss_frame_t decoded;
+      kiss_status_t status = KISS_UnwrapFrame(usb_data_rx.usb_buff,usb_data_rx.len,raw,&decoded);
+      if (decoded.payload_id == KISS_PAYLOAD_ID_VR){
+        if (decoded.pid == KISS_PID_ACK){
+          printf("it acks back\r\n");
+        }
+      }
+      // osThreadResume(MainTaskHandle);
       // for (int i = 0; i < usb_data_rx.len; i++)
       // {
       //   printf("%02X ", usb_data_rx.usb_buff[i]);
       // }
-      printf("\r\n");
+      // printf("\r\n");
       // printf("All Data Size : %lu\r\n",counter);
     }
 

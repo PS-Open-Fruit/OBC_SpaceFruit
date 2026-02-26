@@ -280,7 +280,7 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
   usb_buff.len = copy_len;
   usb_buff.is_new_message = 1;
 
-  printf("len : %ld, new messge flag : %d\r\n",usb_buff.len,usb_buff.is_new_message);
+  // printf("len : %ld, new messge flag : %d\r\n",usb_buff.len,usb_buff.is_new_message);
 
   /* 4. Send to Queue (Timeout MUST be 0 in ISR) */
   if (cdcDataQueueHandle != NULL) {
