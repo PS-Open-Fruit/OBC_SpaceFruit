@@ -97,12 +97,12 @@ class KISSProtocol:
                    command: int = CMD_DATA) -> bytes:
         """
         Frame format:
-        [FEND][CMD][PayloadID][PID][Data...][CRC32][FEND]
+        [FEND][CMD][PayloadID][PID][DataLen][Data...][CRC32][FEND]
 
         CRC32 is calculated over: PayloadID + PID + Data
         """
-
-        structured_payload = bytes([payload_id, pid]) + data
+        data_len = len(data)
+        structured_payload = bytes([payload_id, pid]) + data_len.to_bytes(2,"big") + data
         crc = cls.calculate_crc(structured_payload)
 
         payload_with_crc = structured_payload + crc.to_bytes(4, "big")
@@ -125,7 +125,7 @@ class KISSProtocol:
                          command: int = CMD_DATA) -> bytes:
         """
         Frame format:
-        [FEND][CMD][PayloadID][PID][FileID][ChunkID(4)][Content][CRC32][FEND]
+        [FEND][CMD][PayloadID][PID][FileID][ChunkID(2)][ChunkLen(2)][Content][CRC32][FEND]
         """
         # _payload_id = int.to_bytes(cls.PAYLOAD_IMAGE)
         # _pid = int.to_bytes(pid)
@@ -138,9 +138,11 @@ class KISSProtocol:
         # print(bytes([cls.PAYLOAD_IMAGE, pid, file_id]))
         # print(type(chunk_id.to_bytes(4, "big")))
         # print(type(content))
+        chunk_len = len(content)
         structured = (
             bytes([cls.PAYLOAD_IMAGE, pid, file_id]) +
-            chunk_id.to_bytes(4, "big") +
+            chunk_id.to_bytes(2, "big") +
+            chunk_len.to_bytes(2,"big") +
             content
         )
 
@@ -189,7 +191,8 @@ class KISSProtocol:
         # -------- IMAGE TRANSFER --------
         if (payload_id == cls.PAYLOAD_ID_VR) and (pid == cls.VR_PID_GET_IMAGE_DOWNLOAD):
             file_id = payload[2]
-            chunk_id = int.from_bytes(payload[3:7], "big")
+            chunk_id = int.from_bytes(payload[3:5], "big")
+            content_len = int.from_bytes(payload[5:7], "big")
             content = payload[7:]
 
             return {
@@ -199,6 +202,7 @@ class KISSProtocol:
                 "pid": pid,
                 "file_id": file_id,
                 "chunk_id": chunk_id,
+                "content_length" : content_len,
                 "content": content
             }
 
@@ -212,11 +216,13 @@ class KISSProtocol:
         #         "data": payload[2:]
         #     }
         else:
+            data_len = int.from_bytes(payload[2:4],"big")
             return {
                 "type": "generic",
                 "command": command,
                 "payload_id": payload_id,
                 "pid": pid,
-                "data": payload[2:]
+                "data_len" : data_len,
+                "data": payload[4:]
             }
         return None

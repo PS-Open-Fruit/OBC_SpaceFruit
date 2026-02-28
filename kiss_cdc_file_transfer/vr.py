@@ -18,11 +18,11 @@ PID_ACK                     = 0xAC
 FILE_MODE_IDLE = 0xDE
 FILE_MODE_DUMP = 0x00
 FILE_MODE_WAIT_ACK = 0xAB
-# FILE_MODE_CHUNK = 0x01
+FILE_MODE_CHUNK = 0x01
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-SERIAL_PORT = '/dev/ttys001'
+SERIAL_PORT = '/dev/ttys005'
 BAUD_RATE = 115200
 # FILE_TO_SAVE = 'file.txt' 
 FILE_TO_SAVE = '02191444.jpg' 
@@ -66,15 +66,19 @@ def getCaptureRequest():
                 with open(FILE_TO_SAVE,"rb") as image:
                     data = image.read()
                     print(len(data))
-                    # print("openfile")
                     transfer_content = data[current_chunk_id * CHUNK_SIZE:(current_chunk_id + 1) * CHUNK_SIZE]
+                    print(current_chunk_id)
+                    print(f"{current_chunk_id * CHUNK_SIZE}.  {len(data)}")
 
                     if (current_chunk_id * CHUNK_SIZE <= len(data)):
+                        print("sending")
                         # print(f"transfer content ep 2 : {transfer_content}")
                         reply_frame = KISS.wrap_image_chunk(current_file_id,current_chunk_id,transfer_content,VR_PID_GET_IMAGE_DOWNLOAD)
                         ser.write(reply_frame)
                         file_mode = FILE_MODE_WAIT_ACK
+                        print("Waiting for ack")
                     else:
+                        print("sending done")
                         file_mode = FILE_MODE_IDLE
                         current_chunk_id = 0
                         current_file_id = 0
@@ -103,18 +107,18 @@ def getCaptureRequest():
                     print(f"File Path {filePath} {os.path.getsize(filePath)}")
                     reply = KISS.wrap_frame(PAYLOAD_ID_VR,PID_ACK,b'')
                     ser.write(reply)
-                    if (len(frame['data']) == 1):
-                        file_mode = FILE_MODE_DUMP
-                        # print(frame['data'][0])
-                        current_file_id = frame['data'][0]
-                    if (len(frame['data']) == 5):
-                        file_mode = FILE_MODE_DUMP
-                        # print(type(frame['data'][0]))
+                    print(f"Frame : {frame}")
+                    if (frame['data_len'] == 3):
                         _file_id = frame['data'][0]
-                        _chunk_id = frame['data'][1:5]
+                        _chunk_id = frame['data'][1:3]
                         current_file_id = _file_id
-                        current_chunk_id = int.from_bytes(_chunk_id) 
-                        # print(_file_id,_chunk_id)
+                        requested_chunk = int.from_bytes(_chunk_id,"big") 
+                        if (requested_chunk == 0xFFFF):
+                            current_chunk_id = 0
+                            file_mode = FILE_MODE_DUMP
+                        else:
+                            requested_chunk = requested_chunk
+                            file_mode = FILE_MODE_CHUNK
 
 
 

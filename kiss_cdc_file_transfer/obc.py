@@ -16,7 +16,7 @@ PID_ACK                     = 0xAC
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-SERIAL_PORT = '/dev/ttys005'
+SERIAL_PORT = '/dev/ttys004'
 BAUD_RATE = 115200
 FILE_TO_SAVE = 'out.jpg' 
 
@@ -93,7 +93,10 @@ def recv_whole_frame():
     return recv_frame
 
 def sendRequestTransferCommand():
-    req = KISS.wrap_frame(PAYLOAD_ID_VR,VR_PID_GET_IMAGE_REQUEST,0x00.to_bytes(1))
+    file_request_structure = b''
+    file_request_structure += 0x00.to_bytes(1,"big") # file id
+    file_request_structure += 0xFFFF.to_bytes(2,"big") # chunk id, 0xFFFF means dump everything
+    req = KISS.wrap_frame(PAYLOAD_ID_VR,VR_PID_GET_IMAGE_REQUEST,file_request_structure)
     ser.write(req)
 
     while True:
@@ -115,9 +118,6 @@ def sendRequestTransferCommand():
                     file = open(f"{_file_id}.jpg","wb")
                 else:
                     file = open(f"{_file_id}.jpg","a+b")
-                # with open(f"{_file_id}.jpg","a+b") as file:
-                    # if (_chunk_id == 0):
-                    #     file.seek(0)
                 file.write(_content)
                 file.close()
                 print(f"Write {_file_id} {_chunk_id} {len(_content)}\r\n")
