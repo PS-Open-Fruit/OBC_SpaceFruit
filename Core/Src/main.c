@@ -161,6 +161,11 @@ const osEventFlagsAttr_t epsFlag_attributes = {
 // extern osSemaphoreId_t norTxSemaphoreHandle;
 // extern osSemaphoreId_t norRxSemaphoreHandle;
 
+osEventFlagsId_t payloadFlagHandle;
+const osEventFlagsAttr_t payloadFlag_attr = {
+  .name = "payloadFlag"
+};
+
 uint8_t kiss_buffer[512];
 kiss_frame_t payload_kiss;
 
@@ -185,11 +190,18 @@ const osSemaphoreAttr_t sdTxSemaphoreAttr = {
 #define SD_SPI hspi1
 #define NOR_SPI hspi2
 
-#define EVENT_FLAG_ERROR        0x80000000U
-#define EPS_FLAG_POLL_START     0x00000001U
-#define EPS_FLAG_POLL_SUCCESS   0x00000002U 
-#define EPS_FLAG_POLL_ERROR     0x00000004U
-#define EPS_FLAG_POLL_TIMEOUT   0x00000008U
+#define EVENT_FLAG_ERROR              0x80000000U
+#define EPS_FLAG_POLL_START           0x00000001U
+#define EPS_FLAG_POLL_SUCCESS         0x00000002U 
+#define EPS_FLAG_POLL_ERROR           0x00000004U
+#define EPS_FLAG_POLL_TIMEOUT         0x00000008U
+
+#define PAYLOAD_FLAG_IDLE             0x000000FFU
+#define PAYLOAD_FLAG_POLL_CAPTURE     0x00000001U
+#define PAYLOAD_FLAG_POLL_STATUS      0x00000005U
+#define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000002U
+#define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000003U
+#define PAYLOAD_FLAG_IMAGE_DATA       0x00000004U
 
 // usb_data_t usb_buff;
 
@@ -338,6 +350,7 @@ int main(void)
   epsFlagHandle = osEventFlagsNew(&epsFlag_attributes);
 
   /* USER CODE BEGIN RTOS_EVENTS */
+  payloadFlagHandle = osEventFlagsNew(&payloadFlag_attr);
   /* add events, ... */
   /* USER CODE END RTOS_EVENTS */
 
@@ -1311,11 +1324,14 @@ void mainTask(void *argument)
 void usbTask(void *argument)
 {
   /* USER CODE BEGIN usbTask */
+  const uint8_t USB_RX_CALLBACK_SIZE = 64;
   usb_data_t usb_data_rx = {
       .is_new_message = 0,
       .len = 0
   }; // Local buffer to hold received queue item
-  osDelay(100);
+  // osDelay(100);
+  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+  uint32_t localState = PAYLOAD_FLAG_IDLE;
   for (;;)
   {
     // Block here until data arrives. No CPU usage while waiting.
@@ -1324,10 +1340,12 @@ void usbTask(void *argument)
     if (status == osOK)
     {
       // Data received! Process it.
-      
-      osDelay(10);
+
       // osThreadSuspend(MainTaskHandle);
       printf("Len: %lu\r\n", usb_data_rx.len);
+      if (usb_data_rx.len < USB_RX_CALLBACK_SIZE){
+        
+      }
       // for (int i = 0; i < usb_data_rx.len; i++){
       //   printf("0-%02X ",usb_data_rx.usb_buff[i]);
       // }
@@ -1337,7 +1355,14 @@ void usbTask(void *argument)
       kiss_status_t status = KISS_UnwrapFrame(usb_data_rx.usb_buff,usb_data_rx.len,raw,&decoded);
       if (decoded.payload_id == KISS_PAYLOAD_ID_VR){
         if (decoded.pid == KISS_PID_ACK){
-          printf("it acks back\r\n");
+          uint32_t flag = osEventFlagsGet(payloadFlagHandle);
+          if (flag & PAYLOAD_FLAG_POLL_CAPTURE){
+            printf("Payload acks Capture\r\n");
+          }
+          if (flag & PAYLOAD_FLAG_IMAGE_REQUEST){
+            printf("Payload acks Image Request\r\n");
+            localState = PAYLOAD_FLAG_IMAGE_TRANSFER;
+          }
         }
       }
       // osThreadResume(MainTaskHandle);
