@@ -95,8 +95,8 @@ const osThreadAttr_t MainTask_attributes = {
 osThreadId_t USBTaskHandle;
 const osThreadAttr_t USBTask_attributes = {
   .name = "USBTask",
-  .stack_size = 1024 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 4096 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
 };
 /* Definitions for wdtFeed */
 osThreadId_t wdtFeedHandle;
@@ -196,12 +196,12 @@ const osSemaphoreAttr_t sdTxSemaphoreAttr = {
 #define EPS_FLAG_POLL_ERROR           0x00000004U
 #define EPS_FLAG_POLL_TIMEOUT         0x00000008U
 
-#define PAYLOAD_FLAG_IDLE             0x000000FFU
+#define PAYLOAD_FLAG_IDLE             0x00000020U
 #define PAYLOAD_FLAG_POLL_CAPTURE     0x00000001U
-#define PAYLOAD_FLAG_POLL_STATUS      0x00000005U
-#define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000002U
-#define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000003U
-#define PAYLOAD_FLAG_IMAGE_DATA       0x00000004U
+#define PAYLOAD_FLAG_POLL_STATUS      0x00000002U
+#define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000004U
+#define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000008U
+#define PAYLOAD_FLAG_IMAGE_DATA       0x00000010U
 
 // usb_data_t usb_buff;
 
@@ -1219,7 +1219,7 @@ void mainTask(void *argument)
   };
   rv3028c7_init(&rtc);
   date_time_t datetime;
-
+  osDelay(1000);
   /* Infinite loop */
   for(;;)
   {
@@ -1242,15 +1242,19 @@ void mainTask(void *argument)
     printf("Temperature : %ld\r\n", _obc_sensors.temp);
     printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
 
-    uint8_t cmd_encoded[32] = {0};
-    uint8_t dummy = 0;
-    uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_CAPTURE,&dummy,0,KISS_CMD_DATA, cmd_encoded);
-    CDC_Transmit_FS(cmd_encoded,req_len);
-    printf("KISS Frame Encoded : ");
-    for (int i = 0; i < req_len;i++){
-      printf("0x%02X ",cmd_encoded[i]);
+    if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
+      uint8_t cmd_encoded[32] = {0};
+      uint8_t request_content[3] = {0x00,0xFF,0xFF};
+      uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content,3,KISS_CMD_DATA, cmd_encoded);
+      osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+      osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
+      CDC_Transmit_FS(cmd_encoded,req_len);
+      printf("KISS Frame Encoded : ");
+      for (int i = 0; i < req_len;i++){
+        printf("0x%02X ",cmd_encoded[i]);
+      }
+      printf("\r\n");
     }
-    printf("\r\n");
 
     for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
       uint8_t channel = _eps_sensors.vi_sensor[i].channel;
@@ -1323,61 +1327,146 @@ void mainTask(void *argument)
 /* USER CODE END Header_usbTask */
 void usbTask(void *argument)
 {
-  /* USER CODE BEGIN usbTask */
-  const uint8_t USB_RX_CALLBACK_SIZE = 64;
-  usb_data_t usb_data_rx = {
-      .is_new_message = 0,
-      .len = 0
-  }; // Local buffer to hold received queue item
-  // osDelay(100);
-  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
-  uint32_t localState = PAYLOAD_FLAG_IDLE;
-  for (;;)
-  {
-    // Block here until data arrives. No CPU usage while waiting.
-    osStatus_t status = osMessageQueueGet(cdcDataQueueHandle, (void *)&usb_data_rx, NULL, osWaitForever);
+    usb_data_t usb_data_rx = { .is_new_message = 0, .len = 0 };
+    uint32_t current_offset = 0;
+    uint8_t  temp_buf[2048];
+    uint8_t  payload_content[2048];
+    uint16_t payload_len = 0;
+    uint16_t current_chunk = 0;
 
-    if (status == osOK)
+    kiss_frame_t decoded_payload = { .content = payload_content };
+
+    osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+
+    //some variables for FatFs
+    FATFS FatFs; 	//Fatfs handle
+    FIL fil; 		//File handle
+    FRESULT fres; //Result after operations
+
+    for (;;)
     {
-      // Data received! Process it.
+        osStatus_t status = osMessageQueueGet(cdcDataQueueHandle,
+                                             (void *)&usb_data_rx,
+                                             NULL, osWaitForever);
+        if (status != osOK) continue;
 
-      // osThreadSuspend(MainTaskHandle);
-      printf("Len: %lu\r\n", usb_data_rx.len);
-      if (usb_data_rx.len < USB_RX_CALLBACK_SIZE){
-        
-      }
-      // for (int i = 0; i < usb_data_rx.len; i++){
-      //   printf("0-%02X ",usb_data_rx.usb_buff[i]);
-      // }
-      // printf("\r\n");
-      uint8_t raw[32] = {0};
-      kiss_frame_t decoded;
-      kiss_status_t status = KISS_UnwrapFrame(usb_data_rx.usb_buff,usb_data_rx.len,raw,&decoded);
-      if (decoded.payload_id == KISS_PAYLOAD_ID_VR){
-        if (decoded.pid == KISS_PID_ACK){
-          uint32_t flag = osEventFlagsGet(payloadFlagHandle);
-          if (flag & PAYLOAD_FLAG_POLL_CAPTURE){
-            printf("Payload acks Capture\r\n");
-          }
-          if (flag & PAYLOAD_FLAG_IMAGE_REQUEST){
-            printf("Payload acks Image Request\r\n");
-            localState = PAYLOAD_FLAG_IMAGE_TRANSFER;
-          }
+        /* --- Accumulate --- */
+        if ((current_offset + usb_data_rx.len) > sizeof(temp_buf))
+        {
+            /* Overflow protection: discard and reset */
+            printf("ERR: buffer overflow, resetting\r\n");
+            current_offset = 0;
+            continue;
         }
-      }
-      // osThreadResume(MainTaskHandle);
-      // for (int i = 0; i < usb_data_rx.len; i++)
-      // {
-      //   printf("%02X ", usb_data_rx.usb_buff[i]);
-      // }
-      // printf("\r\n");
-      // printf("All Data Size : %lu\r\n",counter);
-    }
 
-    // NO osDelay(1) here!
-    // We want to loop back immediately to catch the next packet if one is waiting.
-  }
-  /* USER CODE END usbTask */
+        memcpy(&temp_buf[current_offset], usb_data_rx.usb_buff, usb_data_rx.len);
+        current_offset += usb_data_rx.len;
+
+        /* --- O(1) completion check, no CRC yet --- */
+        if (!KISS_IsFrameComplete(temp_buf, current_offset))
+        {
+            /* Frame not done yet, wait for more chunks */
+            continue;
+        }
+
+        /* --- Frame boundary found: NOW do the full decode + CRC --- */
+        printf("Frame complete at offset %lu, unwrapping...\r\n", current_offset);
+
+        kiss_status_t result = KISS_UnwrapFrame(temp_buf, current_offset,
+                                                payload_content, &decoded_payload);
+
+        if (result != KISS_VALID_DATA){
+          for (int i = 0; i < current_offset;i++){
+            printf("%02X ", temp_buf[i]);
+          }
+          printf("\r\n");
+        }
+
+        current_offset = 0; /* Reset accumulator regardless of outcome */
+
+        if (result != KISS_VALID_DATA)
+        {
+            printf("ERR: UnwrapFrame failed: %d\r\n", result);
+            continue;
+        }
+
+        /* --- Process valid frame --- */
+        osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+
+        if (decoded_payload.payload_id == KISS_PAYLOAD_ID_VR)
+        {
+            if (decoded_payload.type == KISS_FRAME_TYPE_IMAGE)
+            {
+                printf("chunk: %d\r\n", current_chunk++);
+                uint8_t  reply_frame[32];
+                uint16_t reply_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_PID_ACK,
+                                                    NULL, 0, 0x00, reply_frame);
+                CDC_Transmit_FS(reply_frame, reply_len);
+                fres = f_open(&fil,"image.jpg", FA_OPEN_APPEND | FA_WRITE);
+                if (fres != FR_OK) {
+                    printf("open to append error (%i)\r\n", fres);
+                      while(1){
+                        osDelay(1);
+                      }
+                }
+                unsigned int written = 0;
+                f_write(&fil,(void*)decoded_payload.content,decoded_payload.content_len,&written);
+                if (fres != FR_OK) {
+                    printf("content append error (%i)\r\n", fres);
+                      while(1){
+                        osDelay(1);
+                      }
+                }
+                printf("written %d\r\n",written);
+                f_close(&fil);
+                continue;
+                // if (decoded_payload.content_len )
+            }
+            if (decoded_payload.pid == KISS_PID_ACK)
+            {
+                uint32_t flag = osEventFlagsGet(payloadFlagHandle);
+                printf("payload_event_flag: %08lX\r\n", flag);
+
+                if (flag & PAYLOAD_FLAG_POLL_CAPTURE)
+                {
+                    printf("Payload acks Capture\r\n");
+                    osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+                }
+                if (flag & PAYLOAD_FLAG_IMAGE_REQUEST)
+                {
+                    printf("Payload acks Image Request\r\n");
+                    current_chunk = 0;
+                    /* Set your image transfer state flag here */
+                        //Open the file system
+                    fres = f_mount(&FatFs, "", 1); //1=mount now
+                    if (fres != FR_OK) {
+                    printf("f_mount error (%i)\r\n", fres);
+                      while(1){
+                        osDelay(1);
+                      }
+                    }
+                    fres = f_open(&fil,"image.jpg",FA_CREATE_ALWAYS);
+                    f_close(&fil);
+                    if (fres != FR_OK) {
+                    printf("create file error (%i)\r\n", fres);
+                      while(1){
+                        osDelay(1);
+                      }
+                    }
+                }
+            }
+            else if (decoded_payload.pid == KISS_VR_PID_IMAGE_DOWNLOAD_DONE){
+              printf("Transfer Image Done\r\n");
+              fres = f_mount(NULL, "", 0);
+              if (fres != FR_OK) {
+                printf("unmount error (%i)\r\n", fres);
+                  while(1){
+                    osDelay(1);
+                  }
+              }
+            }
+        }
+    }
 }
 
 /* USER CODE BEGIN Header_wdtFeedTask */

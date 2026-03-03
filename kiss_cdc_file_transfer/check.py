@@ -4,10 +4,10 @@ destContent : str
 print("\033c")
 
 while True:
-    with open("02191444.jpg","rb") as source:
+    with open("image2.jpg","rb") as source:
     # with open("file.txt","rb") as source:
         sourceContent = source.read()
-    with open("0.jpg" , "rb") as dst:
+    with open("image.jpg" , "rb") as dst:
         destContent = dst.read()
     print(f"Simple check ,Size (SRC) : {len(sourceContent)}, (DST) : {len(destContent)} , (MATCH?) : {len(sourceContent) == len(destContent)}")
     fail = len(sourceContent) != len(destContent)
