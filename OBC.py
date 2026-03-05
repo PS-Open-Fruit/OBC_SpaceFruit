@@ -134,10 +134,14 @@ def main():
 
                                 elif p_id == VR_SUBSYSTEM:
                                     if pid == 0x00: # Pi Status
-                                        dummy_data = struct.pack('>bBB',
-                                            45,   # CPUTemp (signed)
-                                            60,   # RAMUsage 
-                                            0x01  # CameraStatus: Ready
+                                        dummy_data = struct.pack('>IIBbBBB3x',
+                                            1772722800, # Timestamp (uint32)
+                                            3600,       # Uptime seconds (uint32)
+                                            15,         # CPULoadPercent (uint8)
+                                            45,         # CPUTemp (int8)
+                                            60,         # RAMUsagePercent (uint8)
+                                            30,         # DiskUsagePercent (uint8)
+                                            0x01        # CameraStatus: Ready (uint8)
                                         )
                                         
                                     elif pid == 0x01: # Capture

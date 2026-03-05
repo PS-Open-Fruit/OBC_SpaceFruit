@@ -164,9 +164,9 @@ def main():
                                             
                                     elif p_id == 0x01:
                                         if pid == 0x00: # Pi Status
-                                            cpu, ram, cam = struct.unpack('>bBB', data)
+                                            ts, up, cpu_l, cpu_t, ram, disk, cam = struct.unpack('>IIBbBBB3x', data)
                                             cam_str = {0:"Err", 1:"Ready", 2:"Busy"}.get(cam, "Unknown")
-                                            print(f"     Pi Status -> CPU: {cpu}C | RAM: {ram}% | CAM: {cam_str}")
+                                            print(f"     Pi Status -> Time: {ts} | Up: {up}s | CPU: {cpu_l}% ({cpu_t}C) | RAM: {ram}% | Disk: {disk}% | CAM: {cam_str}")
                                             
                                         elif pid == 0x01: # Capture
                                             status, name_len = struct.unpack('>BB', data[:2])
