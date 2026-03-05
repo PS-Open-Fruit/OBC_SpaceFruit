@@ -64,9 +64,6 @@ def cli_thread():
                     offset = int(input("  Enter Offset: ") or "0")
                     length = int(input("  Enter Read Length: ") or "1024")
                     req_data = struct.pack('>B', len(fname)) + fname + struct.pack('>IH', offset, length)
-                elif p_id == 0x01 and pid == 0x01: # Capture
-                    res = int(input("  Enter Resolution (0=1080p, 1=720p): ") or "0")
-                    req_data = struct.pack('>B', res)
                     
                 command_queue.put((p_id, pid, desc, req_data))
             else:
