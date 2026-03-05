@@ -42,13 +42,57 @@ Handles standard packet delimiting overhead.
   * e.g., For `PayloadID 0x00`, `PID 0x00` means *List SD Files*. For `PayloadID 0x01`, `PID 0x00` means *Get Pi Status*.
 * **`DataLen`:** 16-bit Big-Endian length of the following `Data` field.
 
-### 3. Application Layer (Data)
+### 3. Application Layer (Data Payload)
 Instead of string parsing, Data payloads are strictly packed binary C-structs.
 
-**Examples:**
-*   **Requesting File Info**: Pack `>B` (Length) + `char[]` (Filename)
-*   **Receiving File Info**: Unpack `>BII` Status (1 byte), FileSize (4 bytes), Timestamp (4 bytes).
-*   **Pi Status Response**: Unpack `>bBB` CPU Temp (signed 8-bit), RAM% (unsigned 8-bit), Camera Status (unsigned 8-bit). 
+**Standard Data Types & Status Codes:**
+*   `uint8_t` (1 byte, unsigned) - Python `struct` format: `B`
+*   `uint16_t` (2 bytes, unsigned) - Python `struct` format: `H`
+*   `uint32_t` (4 bytes, unsigned) - Python `struct` format: `I`
+*   `int8_t` (1 byte, signed) - Python `struct` format: `b`
+
+**Common Status Byte (returned in most responses):**
+* `0x00`: Success (OK) / `0x01`: File Not Found / Generic Error / `0x02`: Device Busy
+
+#### 1. SD Card Subsystem (PayloadID: `0x00`)
+
+**Request List Files `(PID: 0x00)`**
+*   **Request Data**: `[Empty]`
+*   **Response Data**:
+    *   `[NumFiles (uint8_t)]` -> Count of files
+    *   *Followed by `NumFiles` entries of:* `[FileNameLength (uint8_t)]` + `[FileName (ascii array)]`
+
+**Request File Info `(PID: 0x01)`**
+*   **Request Data**: `[FileNameLength (uint8_t)]` + `[FileName (ascii array)]`
+*   **Response Data**: `[Status (uint8_t)]` + `[FileSize (uint32_t)]` + `[CreatedTimestamp (uint32_t)]`
+
+**Request File Data `(PID: 0x02)`**
+*(Split into chunks to abide by KISS MTU constraints)*
+*   **Request Data**: `[NameLen (uint8_t)]` + `[Name (ascii)]` + `[Offset (uint32_t)]` + `[ReadLength (uint16_t)]`
+*   **Response Data**: `[Status (uint8_t)]` + `[Offset (uint32_t)]` + `[ActualDataLength (uint16_t)]` + `[Raw File Bytes]`
+
+#### 2. VR Payload / Pi Zero (PayloadID: `0x01`)
+
+**Request Pi Status `(PID: 0x00)`**
+*   **Request Data**: `[Empty]`
+*   **Response Data**: 16-byte fixed structure.
+    *   `[Timestamp (uint32_t)]` -> Unix epoch time on the Pi.
+    *   `[Uptime (uint32_t)]` -> Seconds since boot.
+    *   `[CPULoadPercent (uint8_t)]` -> e.g., 25 for 25%.
+    *   `[CPUTemp (int8_t)]` -> e.g., 45 for 45°C.
+    *   `[RAMUsagePercent (uint8_t)]` -> e.g., 60 for 60%.
+    *   `[DiskUsagePercent (uint8_t)]` -> e.g., 85 for 85%.
+    *   `[CameraStatus (uint8_t)]` -> 0x00=Error, 0x01=Ready, 0x02=Busy capturing.
+    *   *Reserved 3 padding bytes to align to 32 bits.*
+
+**Request Capture `(PID: 0x01)`**
+*   **Request Data**: `[Empty]`
+*   **Response Data**: `[Status (uint8_t)]` + `[SavedFileNameLength (uint8_t)]` + `[SavedFileName (ascii array)]`
+
+**Request Copy Image to SD `(PID: 0x02)`**
+*   **Request Data**: `[FileNameLength (uint8_t)]` + `[FileName (ascii array)]`
+*   **Response Data**: `[Status (uint8_t)]`
+
 
 ## How to run the Emulator
 
