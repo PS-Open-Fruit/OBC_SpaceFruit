@@ -106,9 +106,24 @@ def main():
                                     print("  -> Routing to: Unknown Subsystem!")
                                 
                                 # Emulate sending a response back to GS
-                                print("  -> Emulating Response...")
                                 seq_counter = (seq_counter + 1) % 256
-                                dummy_data = b'OK'  # Emulated successful response data
+                                
+                                # Generate specific dummy data based on the request
+                                dummy_data = b'OK'
+                                if p_id == OBC_SUBSYSTEM:
+                                    if pid == 0x00:
+                                        dummy_data = b'image_01.jpg,telemetry.csv,log.txt'
+                                    elif pid == 0x01:
+                                        dummy_data = b'image_01.jpg|2.4MB|2026-03-05'
+                                    elif pid == 0x02:
+                                        dummy_data = b'\\xFF\\xD8\\xFF\\xE0 (Simulated JPEG Magic Bytes)'
+                                elif p_id == VR_SUBSYSTEM:
+                                    if pid == 0x00:
+                                        dummy_data = b'CPU: 45C | RAM: 60% | CAM: Ready'
+                                    elif pid == 0x01:
+                                        dummy_data = b'Capture Success! Saved as image_02.jpg'
+                                    elif pid == 0x02:
+                                        dummy_data = b'Copying image_02.jpg to SD -> Done.'
                                 
                                 # Send response (Command 0x01) echoing the p_id and pid
                                 custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)

@@ -16,8 +16,10 @@ BAUD = 9600
 REQUESTS = [
     (0x00, 0x00, "Request List files (SD)"),
     (0x00, 0x01, "Request File Info (SD)"),
+    (0x00, 0x02, "Request File Data (SD)"),
+    (0x01, 0x00, "Request Pi Status (VR)"),
     (0x01, 0x01, "Request Capture (VR)"),
-    (0x01, 0x00, "Request Pi Status (VR)")
+    (0x01, 0x02, "Request Copy Image to SD (VR)")
 ]
 
 def colorize_raw_frame(frame: bytes) -> str:
@@ -121,7 +123,13 @@ def main():
                             
                             # Handle Data Frame (Command 0x01)
                             if cmd == 0x01:
-                                print(f"  <- Received Response [PayloadID: 0x{p_id:02X}, PID: 0x{pid:02X}, Seq: {seq}] Data: {data}")
+                                try:
+                                    decoded_text = data.decode('utf-8')
+                                except UnicodeDecodeError:
+                                    decoded_text = f"<binary data: {data.hex()}>"
+                                    
+                                print(f"  <- Received Response [PayloadID: 0x{p_id:02X}, PID: 0x{pid:02X}, Seq: {seq}]")
+                                print(f"     Content: \033[93m{decoded_text}\033[0m")
                                 
                                 highest_seq_received = max(highest_seq_received, seq)
                                 packets_received_in_window += 1
