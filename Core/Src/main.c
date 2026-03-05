@@ -82,6 +82,7 @@ UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_uart4_rx;
 DMA_HandleTypeDef hdma_uart5_tx;
 
 /* Definitions for MainTask */
@@ -119,6 +120,13 @@ const osThreadAttr_t printTask_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
+/* Definitions for uartRxTask */
+osThreadId_t uartRxTaskHandle;
+const osThreadAttr_t uartRxTask_attributes = {
+  .name = "uartRxTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
 uint8_t cdcDataQueueBuffer[ 128 * sizeof( usb_data_t ) ];
@@ -145,6 +153,11 @@ osMutexId_t sensorsMutexHandle;
 const osMutexAttr_t sensorsMutex_attributes = {
   .name = "sensorsMutex"
 };
+/* Definitions for uartMutex */
+osMutexId_t uartMutexHandle;
+const osMutexAttr_t uartMutex_attributes = {
+  .name = "uartMutex"
+};
 /* Definitions for myBinarySem01 */
 osSemaphoreId_t myBinarySem01Handle;
 const osSemaphoreAttr_t myBinarySem01_attributes = {
@@ -157,9 +170,16 @@ const osEventFlagsAttr_t epsFlag_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-
+uint8_t commTempBuf = 0;
+uint8_t commu_data_len = 0;
+uint8_t commu_data_buff[64] = {0};
 // extern osSemaphoreId_t norTxSemaphoreHandle;
 // extern osSemaphoreId_t norRxSemaphoreHandle;
+
+osMessageQueueId_t communicationUartQueueHandle;
+const osMessageQueueAttr_t communicationUartQueue_attributes = {
+  .name = "communicationUartQueue"
+};
 
 osEventFlagsId_t payloadFlagHandle;
 const osEventFlagsAttr_t payloadFlag_attr = {
@@ -170,9 +190,18 @@ uint8_t kiss_buffer[512];
 kiss_frame_t payload_kiss;
 
 osSemaphoreId_t norSemaphoreHandle;
-
 const osSemaphoreAttr_t norSemaphoreAttr = {
   .name = "norFlashSemaphore"
+};
+
+osSemaphoreId_t commuSemaphoreHandle;
+const osSemaphoreAttr_t commuSemaphoreAttr = {
+  .name = "commuSemaphore"
+};
+
+osSemaphoreId_t epsSemaphoreHandle;
+const osSemaphoreAttr_t epsSemaphoreAttr = {
+  .name = "epsSemaphore"
 };
 
 osSemaphoreId_t sdTxSemaphoreHandle;
@@ -187,6 +216,7 @@ const osSemaphoreAttr_t sdTxSemaphoreAttr = {
 
 #define COM_UART huart4
 #define EPS_UART huart2
+#define DBG_UART huart5
 #define SD_SPI hspi1
 #define NOR_SPI hspi2
 
@@ -227,6 +257,7 @@ void usbTask(void *argument);
 void wdtFeedTask(void *argument);
 void sensorQueryTask(void *argument);
 void logTask(void *argument);
+void uartRx(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -293,6 +324,9 @@ int main(void)
   /* creation of sensorsMutex */
   sensorsMutexHandle = osMutexNew(&sensorsMutex_attributes);
 
+  /* creation of uartMutex */
+  uartMutexHandle = osMutexNew(&uartMutex_attributes);
+
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
@@ -306,6 +340,8 @@ int main(void)
   sdTxSemaphoreHandle = osSemaphoreNew(1,0,&sdTxSemaphoreAttr);
   sdRxSemaphoreHandle = osSemaphoreNew(1,0,&sdRxSemaphoreAttr);
   norSemaphoreHandle = osSemaphoreNew(1,0,&norSemaphoreAttr);
+  epsSemaphoreHandle = osSemaphoreNew(1,0,&epsSemaphoreAttr);
+  commuSemaphoreHandle = osSemaphoreNew(1,0,&commuSemaphoreAttr);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -323,6 +359,7 @@ int main(void)
   printQueueHandle = osMessageQueueNew (256, sizeof(uint8_t), &printQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
+  communicationUartQueueHandle = osMessageQueueNew(16,sizeof(uint16_t),&communicationUartQueue_attributes);
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
@@ -341,6 +378,9 @@ int main(void)
 
   /* creation of printTask */
   printTaskHandle = osThreadNew(logTask, NULL, &printTask_attributes);
+
+  /* creation of uartRxTask */
+  uartRxTaskHandle = osThreadNew(uartRx, NULL, &uartRxTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -845,6 +885,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+  /* DMA2_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel5_IRQn);
 
 }
 
@@ -1027,9 +1070,13 @@ PUTCHAR_PROTOTYPE
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-    if (huart == &EPS_UART){
+    if (huart->Instance == EPS_UART.Instance){
       osMessageQueuePut(epsUartQueueHandle, (void *)&Size, 0, 0);
     }
+    // if (huart->Instance == DBG_UART.Instance){
+
+    // }
+
 
 }
 
@@ -1040,6 +1087,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
     // printf("callback index : %u\r\n",Size);
     // osSemaphoreRelease(epsDataSemHandle);
     // osMessageQueuePut(epsUartQueueHandle, (void *)&ready, 0, 0);
+  }
+
+  if (huart->Instance == COM_UART.Instance){
+    HAL_UART_Receive_IT(&COM_UART,&commTempBuf,1);
+    osSemaphoreRelease(commuSemaphoreHandle);
   }
 
 }
@@ -1088,9 +1140,10 @@ void mainTask(void *argument)
   fs_init(&flash);
   lfs_file_t file;
   printf("LFS Init\r\n");
+  osDelay(100);
   // mount the filesystem
   int err = lfs_mount(&lfs, &cfg);
-  printf("LFS Mount\r\n");
+  printf("LFS Mount\r\n",err);
   // reformat if we can't mount the filesystem
   // this should only happen on the first boot
   if (err)
@@ -1121,8 +1174,6 @@ void mainTask(void *argument)
   // print the boot count
 
   printf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
-
-    osDelay(1000); //a short delay is important to let the SD card settle
 
     //some variables for FatFs
     FATFS FatFs; 	//Fatfs handle
@@ -1219,7 +1270,9 @@ void mainTask(void *argument)
   };
   rv3028c7_init(&rtc);
   date_time_t datetime;
-  osDelay(1000);
+  HAL_UART_Receive_IT(&COM_UART,&commTempBuf,1);
+  osDelay(2000);
+  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
   /* Infinite loop */
   for(;;)
   {
@@ -1241,6 +1294,10 @@ void mainTask(void *argument)
     }
     printf("Temperature : %ld\r\n", _obc_sensors.temp);
     printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
+
+    // if(KISS_IsFrameComplete(commu_data_buff,commu_data_len)){
+    //   printf("Commu frame complete in main task\r\n");
+    // }
 
     if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
       uint8_t cmd_encoded[32] = {0};
@@ -1319,6 +1376,8 @@ void mainTask(void *argument)
 }
 
 /* USER CODE BEGIN Header_usbTask */
+uint8_t  temp_buf[32768];
+uint8_t  payload_content[32768];
 /**
  * @brief Function implementing the USBTask thread.
  * @param argument: Not used
@@ -1327,10 +1386,10 @@ void mainTask(void *argument)
 /* USER CODE END Header_usbTask */
 void usbTask(void *argument)
 {
+  /* USER CODE BEGIN usbTask */
+  /* Infinite loop */
     usb_data_t usb_data_rx = { .is_new_message = 0, .len = 0 };
     uint32_t current_offset = 0;
-    uint8_t  temp_buf[2048];
-    uint8_t  payload_content[2048];
     uint16_t payload_len = 0;
     uint16_t current_chunk = 0;
 
@@ -1467,6 +1526,7 @@ void usbTask(void *argument)
             }
         }
     }
+  /* USER CODE END usbTask */
 }
 
 /* USER CODE BEGIN Header_wdtFeedTask */
@@ -1512,7 +1572,6 @@ void sensorQueryTask(void *argument)
 
  
   tmp1075_init(&temp_sen);
-  
   for (;;)
   {
     // osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
@@ -1625,11 +1684,48 @@ void logTask(void *argument)
   for(;;)
   {
     osMessageQueueGet(printQueueHandle,&ch,NULL,osWaitForever);
-    // HAL_UART_Transmit_DMA(&huart5, (uint8_t *)&ch, 1);
+    // HAL_UART_Transmit_IT(&huart5, (uint8_t *)&ch, 1);
     HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
     // osDelay(1);
   }
   /* USER CODE END logTask */
+}
+
+/* USER CODE BEGIN Header_uartRx */
+/**
+* @brief Function implementing the uartRxTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_uartRx */
+void uartRx(void *argument)
+{
+  /* USER CODE BEGIN uartRx */
+  typedef enum {
+    DATA_STATE_IDLE,
+    DATA_STATE_RECEIVING,
+  } uart_state;
+  uint16_t commu_rx_len = 0;
+  uint8_t commu_state = DATA_STATE_IDLE;
+  uint8_t commu_offset = 0;
+  uint16_t eps_rx_len = 0;
+  // osDelay(2000);
+  /* Infinite loop */
+  for(;;)
+  {
+    // printf("Loop of uartRx Task\r\n");
+    osSemaphoreAcquire(commuSemaphoreHandle,osWaitForever);
+      commu_data_buff[commu_offset] = commTempBuf;
+      commu_offset += 1;
+      uint8_t check = KISS_IsFrameComplete(commu_data_buff,commu_offset);
+      printf("RX Commu %d is it kiss? %d\r\n",commu_offset,check);
+      if (check){
+        printf("COMMU KISS Valid Frame\r\n");
+        commu_data_len = commu_offset;
+        commu_offset = 0;
+      }
+  }
+  /* USER CODE END uartRx */
 }
 
 /**
