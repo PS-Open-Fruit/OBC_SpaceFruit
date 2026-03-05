@@ -20,7 +20,7 @@ PIDs = {
 
 def build_custom_payload(payload_id: int, pid: int, seq_num: int, data: bytes) -> bytes:
     data_len = len(data)
-    header = struct.pack('>BBBH', payload_id, pid, seq_num, data_len)
+    header = struct.pack('>BBBH', seq_num, payload_id, pid, data_len)
     content = header + data
     crc = KISSProtocol.calculate_crc(content)
     return content + struct.pack('>I', crc)
@@ -33,7 +33,7 @@ def parse_custom_payload(payload_bytes: bytes):
     calculated_crc = KISSProtocol.calculate_crc(content)
     if received_crc != calculated_crc:
         return None
-    payload_id, pid, seq_num, data_len = struct.unpack('>BBBH', content[:5])
+    seq_num, payload_id, pid, data_len = struct.unpack('>BBBH', content[:5])
     data = content[5:5+data_len]
     return payload_id, pid, seq_num, data
 
@@ -52,7 +52,8 @@ def main():
         if time.time() - last_request_time > 5.0:
             print("\n[GS] Requesting Telemetry from OBC...")
             custom_payload = build_custom_payload(0x00, 0xFF, 0x00, b'') 
-            req_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
+            req_frame = KISSProtocol.wrap_frame(custom_payload, command=0x00)
+            print(f"\033[96m  -> TX Raw Frame: {req_frame.hex(' ').upper()}\033[0m")
             ser.write(req_frame)
             
             last_request_time = time.time()
@@ -67,14 +68,15 @@ def main():
                 if len(rx_buffer) >= 3:
                     unwrapped = KISSProtocol.unwrap_frame(bytes(rx_buffer))
                     if unwrapped:
+                        print(f"\033[92m  <- RX Raw Frame: {rx_buffer.hex(' ').upper()}\033[0m")
                         cmd, payload_bytes = unwrapped
                         parsed = parse_custom_payload(payload_bytes)
                         
                         if parsed:
                             p_id, pid, seq, data = parsed
                             
-                            # Handle Data Frame (Command 0x00)
-                            if cmd == 0x00:
+                            # Handle Data Frame (Command 0x01)
+                            if cmd == 0x01:
                                 value = struct.unpack('>f', data)[0]
                                 sensor_name = PIDs.get(pid, f"Unknown PID 0x{pid:02X}")
                                 print(f"  <- Received: {sensor_name} = {value:.2f} (Seq: {seq})")
@@ -87,6 +89,7 @@ def main():
                                     print(f"[GS] Window complete. Sending ACK for SeqNum {highest_seq_received}")
                                     ack_payload = build_custom_payload(0x00, 0x00, highest_seq_received, b'')
                                     ack_frame = KISSProtocol.wrap_frame(ack_payload, command=0xAC)
+                                    print(f"\033[96m  -> TX Raw Frame: {ack_frame.hex(' ').upper()}\033[0m")
                                     ser.write(ack_frame)
                                     
                 rx_buffer = bytearray(FEND_BYTE)

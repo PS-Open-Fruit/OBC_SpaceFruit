@@ -20,10 +20,10 @@ PIDs = {
 }
 
 def build_custom_payload(payload_id: int, pid: int, seq_num: int, data: bytes) -> bytes:
-    """Builds the internal payload: [PayloadID][PID][SeqNum][DataLen][Data][CRC32]"""
+    """Builds the internal payload: [SeqNum][PayloadID][PID][DataLen][Data][CRC32]"""
     data_len = len(data)
     # Pack Header: > (Big-Endian), B (1-byte), H (2-byte)
-    header = struct.pack('>BBBH', payload_id, pid, seq_num, data_len)
+    header = struct.pack('>BBBH', seq_num, payload_id, pid, data_len)
     content = header + data
     
     # Calculate and append CRC32
@@ -43,7 +43,7 @@ def parse_custom_payload(payload_bytes: bytes):
         print("CRC Error!")
         return None
         
-    payload_id, pid, seq_num, data_len = struct.unpack('>BBBH', content[:5])
+    seq_num, payload_id, pid, data_len = struct.unpack('>BBBH', content[:5])
     data = content[5:5+data_len]
     return payload_id, pid, seq_num, data
 
@@ -64,14 +64,15 @@ def main():
                 if len(rx_buffer) >= 3:
                     unwrapped = KISSProtocol.unwrap_frame(bytes(rx_buffer))
                     if unwrapped:
+                        print(f"\033[92m  <- RX Raw Frame: {rx_buffer.hex(' ').upper()}\033[0m")
                         cmd, payload_bytes = unwrapped
                         parsed = parse_custom_payload(payload_bytes)
                         
                         if parsed:
                             p_id, pid, seq, data = parsed
                             
-                            # Handle GS Request (Command 0x01)
-                            if cmd == 0x01:
+                            # Handle GS Request (Command 0x00)
+                            if cmd == 0x00:
                                 print("\n[OBC] Received Telemetry Request. Sending Data Burst...")
                                 
                                 for sensor_pid, name in PIDs.items():
@@ -81,8 +82,9 @@ def main():
                                     
                                     # Build internal payload, then wrap in KISS frame
                                     custom_payload = build_custom_payload(0x00, sensor_pid, seq_counter, data_bytes)
-                                    tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x00)
+                                    tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
                                     
+                                    print(f"\033[96m  -> TX Raw Frame: {tx_frame.hex(' ').upper()}\033[0m")
                                     ser.write(tx_frame)
                                     print(f"  -> Sent {name} (PID: 0x{sensor_pid:02X}, Seq: {seq_counter})")
                                     time.sleep(0.05)
