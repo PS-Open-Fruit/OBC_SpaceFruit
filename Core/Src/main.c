@@ -164,6 +164,8 @@ const osEventFlagsAttr_t epsFlag_attributes = {
 /* USER CODE BEGIN PV */
 
 
+uint8_t eps_state = EPS_DATA_NO_DATA;
+
 osEventFlagsId_t payloadFlagHandle;
 const osEventFlagsAttr_t payloadFlag_attr = {
   .name = "payloadFlag"
@@ -997,7 +999,7 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
     
     // 3. Wait for Response (Timeout 500ms)
     uint16_t rx_len;
-    osStatus_t status = osMessageQueueGet(epsUartQueueHandle, &rx_len, NULL, 500);
+    osStatus_t status = osMessageQueueGet(epsUartQueueHandle, &rx_len, NULL, EPS_WAIT_TIMTOUT);
 
     if (status != osOK) { 
       // We timed out. The UART is likely still waiting for data.
@@ -1157,6 +1159,8 @@ void mainTask(void *argument)
   kiss_frame_t output_frame = {
     .content = kiss_content
   };
+
+  uint8_t local_eps_state = EPS_DATA_NO_DATA;
   // osDelay(2000);
   // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
   /* Infinite loop */
@@ -1173,6 +1177,8 @@ void mainTask(void *argument)
       _obc_sensors.datetime = datetime;
       _eps_sensors = eps_sensors_data;
       sensors_data_ready = 1;
+      local_eps_state = eps_state;
+      eps_state = EPS_DATA_CONSUMED;
       osMutexRelease(sensorsMutexHandle);
     }
     if (!sensors_data_ready){
@@ -1199,6 +1205,7 @@ void mainTask(void *argument)
             uint16_t ack_len = 0;
             uint8_t msg[32] = {0};
             ack_len = KISS_Encode(ack_msg,2,msg);
+            printf("ACK to COMMU\r\n");
             HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
           }
         }
@@ -1220,45 +1227,53 @@ void mainTask(void *argument)
       printf("\r\n");
     }
 
-    
-    for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
-      uint8_t channel = _eps_sensors.vi_sensor[i].channel;
-      int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
-      int16_t current = _eps_sensors.vi_sensor[i].current;
-      eps_data_state data_state = _eps_sensors.vi_sensor[i].data_state;
-      if (data_state == EPS_DATA_OK){
-        printf("VI Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+    if (local_eps_state == EPS_DATA_OK){
+  
+      
+      for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
+        uint8_t channel = _eps_sensors.vi_sensor[i].channel;
+        int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
+        int16_t current = _eps_sensors.vi_sensor[i].current;
+        eps_data_state data_state = _eps_sensors.vi_sensor[i].data_state;
+        if (data_state == EPS_DATA_OK){
+          printf("VI Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+        }
+        _eps_sensors.vi_sensor[i].data_state = EPS_DATA_CONSUMED;
       }
-    }
-
-    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
-      uint8_t channel = _eps_sensors.output_sensor[i].channel;
-      int16_t voltage = _eps_sensors.output_sensor[i].voltage;
-      int16_t current = _eps_sensors.output_sensor[i].current;
-      eps_data_state data_state = _eps_sensors.output_sensor[i].data_state;
-      if (data_state == EPS_DATA_OK){
-        printf("Output Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+  
+      for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+        uint8_t channel = _eps_sensors.output_sensor[i].channel;
+        int16_t voltage = _eps_sensors.output_sensor[i].voltage;
+        int16_t current = _eps_sensors.output_sensor[i].current;
+        eps_data_state data_state = _eps_sensors.output_sensor[i].data_state;
+        if (data_state == EPS_DATA_OK){
+          printf("Output Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+        }
+        _eps_sensors.output_sensor[i].data_state = EPS_DATA_CONSUMED;
       }
-    }
-
-    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
-      uint8_t channel = _eps_sensors.output_state[i].channel;
-      uint8_t status = _eps_sensors.output_state[i].status;
-      eps_data_state data_state = _eps_sensors.output_state[i].data_state;
-      if (data_state != EPS_DATA_OK){
-        continue;
+  
+      for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+        uint8_t channel = _eps_sensors.output_state[i].channel;
+        uint8_t status = _eps_sensors.output_state[i].status;
+        eps_data_state data_state = _eps_sensors.output_state[i].data_state;
+        if (data_state != EPS_DATA_OK){
+          continue;
+        }
+        printf("Output State CH %d, State %d\r\n",channel,status);
+        _eps_sensors.output_state[i].data_state = EPS_DATA_CONSUMED;
       }
-      printf("Output State CH %d, State %d\r\n",channel,status);
-    }
-
-    for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
-      uint8_t channel = _eps_sensors.battery_temperature[i].channel;
-      int16_t temp = _eps_sensors.battery_temperature[i].temperature * 1000;
-      eps_data_state data_state = _eps_sensors.battery_temperature[i].data_state;
-      if (data_state != EPS_DATA_OK){
-        continue;
+  
+      for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
+        uint8_t channel = _eps_sensors.battery_temperature[i].channel;
+        int16_t temp = _eps_sensors.battery_temperature[i].temperature * 1000;
+        eps_data_state data_state = _eps_sensors.battery_temperature[i].data_state;
+        if (data_state != EPS_DATA_OK){
+          continue;
+        }
+        printf("Battery Temperature CH %d, Temperature %d State %d\r\n",channel,temp,data_state);
+        _eps_sensors.battery_temperature[i].data_state = EPS_DATA_CONSUMED;
       }
-      printf("Battery Temperature CH %d, Temperature %d State %d\r\n",channel,temp,data_state);
+      local_eps_state = EPS_DATA_CONSUMED;
     }
 
     // }
@@ -1277,15 +1292,15 @@ void mainTask(void *argument)
     // }
 
     printf("\r\n");
-    osDelay(2000);
+    osDelay(1000);
   }
   // printf("It exits main task\r\n");
   /* USER CODE END 5 */
 }
 
 /* USER CODE BEGIN Header_usbTask */
-uint8_t  temp_buf[32768];
-uint8_t  payload_content[32768];
+uint8_t  temp_buf[40000];
+uint8_t  payload_content[40000];
 /**
  * @brief Function implementing the USBTask thread.
  * @param argument: Not used
@@ -1315,6 +1330,8 @@ void usbTask(void *argument)
         osStatus_t status = osMessageQueueGet(cdcDataQueueHandle,
                                              (void *)&usb_data_rx,
                                              NULL, osWaitForever);
+
+          // printf("Queue Trigger\r\n");
         if (status != osOK) continue;
         /* --- Accumulate --- */
         if ((current_offset + usb_data_rx.len) > sizeof(temp_buf))
@@ -1337,7 +1354,7 @@ void usbTask(void *argument)
         }
 
         /* --- Frame boundary found: NOW do the full decode + CRC --- */
-        printf("Frame complete at offset %lu, unwrapping...\r\n", current_offset);
+        // printf("Frame complete at offset %lu, unwrapping...\r\n", current_offset);
 
         kiss_status_t result = KISS_UnwrapFrame(temp_buf, current_offset,
                                                 payload_content, &decoded_payload);
@@ -1357,11 +1374,12 @@ void usbTask(void *argument)
         {
             if (decoded_payload.type == KISS_FRAME_TYPE_IMAGE)
             {
-                printf("chunk: %d\r\n", current_chunk++);
+                // printf("chunk: %d\r\n", current_chunk++);
                 uint8_t  reply_frame[32];
                 uint16_t reply_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_PID_ACK,
                                                     NULL, 0, 0x00, reply_frame);
                 CDC_Transmit_FS(reply_frame, reply_len);
+                // decoded_payload.file_id
                 fres = f_open(&fil,"image.jpg", FA_OPEN_APPEND | FA_WRITE);
                 if (fres != FR_OK) {
                     printf("open to append error (%i)\r\n", fres);
@@ -1377,7 +1395,7 @@ void usbTask(void *argument)
                         osDelay(1);
                       }
                 }
-                printf("written %d\r\n",written);
+                // printf("written %d\r\n",written);
                 f_close(&fil);
                 continue;
                 // if (decoded_payload.content_len )
@@ -1494,7 +1512,11 @@ void sensorQueryTask(void *argument)
 
     uint16_t offset = 0;
     if (decoded_len != 0){
-
+      osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,500);
+      if (os_ret == osOK){
+        eps_state = EPS_DATA_OK;
+        osMutexRelease(sensorsMutexHandle);
+      }
       // 1. Parse VI Sensors (8 Channels * 5 bytes = 40 bytes)
       for (uint8_t i = 0; i < EPS_NUM_VI_CHANNEL; i++) {
           if (offset + 5 > decoded_len) break; // Safety bounds check
