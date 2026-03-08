@@ -162,6 +162,15 @@ const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
+const uint32_t COMMU_RX_TIMEOUT = 3000;
+#define MAX_BEACON_PACKET_SIZE 256U
+typedef enum {
+  SYSTEM_STATE_BEACON,
+  SYSTEM_STATE_DOWNLINK,
+} satellite_state;
+
+satellite_state system_state = SYSTEM_STATE_BEACON;
+const uint32_t beacon_interval = 10000;
 
 
 uint8_t eps_state = EPS_DATA_NO_DATA;
@@ -1048,6 +1057,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     }
     if (huart->Instance == COM_UART.Instance) {
         osMessageQueuePut(communicationUartQueueHandle, &Size, 0, 0);
+        HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
         /* Do NOT re-arm here — let the task do it after copying commu_temp_buff */
     }
 }
@@ -1110,7 +1120,7 @@ void mainTask(void *argument)
   osDelay(100);
   // mount the filesystem
   int err = lfs_mount(&lfs, &cfg);
-  printf("LFS Mount\r\n",err);
+  printf("LFS Mount %d\r\n",err);
   // reformat if we can't mount the filesystem
   // this should only happen on the first boot
   if (err)
@@ -1164,8 +1174,25 @@ void mainTask(void *argument)
   // osDelay(2000);
   // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
   /* Infinite loop */
+
+  uint8_t eps_beacon_buf[EPS_PACKED_BUFFER_SIZE] = {0};
+  uint8_t eps_beacon_len = 0;
+
+  uint8_t beacon_content_buf[MAX_BEACON_PACKET_SIZE] = {0};
+  uint16_t beacon_content_len = 0;
+  uint32_t beacon_timeNow = 0;
+  satellite_state local_state = SYSTEM_STATE_BEACON;
   for(;;)
   {
+    osMutexAcquire(systemStateMutexHandle,1000);
+    local_state = system_state;
+    osMutexRelease(systemStateMutexHandle);
+    uint32_t ticks = osKernelGetTickCount();
+    uint32_t freq  = osKernelGetTickFreq();
+
+      // Convert ticks to milliseconds
+    uint32_t millis = (ticks * 1000U) / freq;
+
     sensors_data_ready = 0;
     HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
     osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
@@ -1227,9 +1254,8 @@ void mainTask(void *argument)
       printf("\r\n");
     }
 
-    if (local_eps_state == EPS_DATA_OK){
+    if (local_eps_state == EPS_DATA_OK && local_state == SYSTEM_STATE_BEACON){
   
-      
       for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
         uint8_t channel = _eps_sensors.vi_sensor[i].channel;
         int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
@@ -1274,6 +1300,42 @@ void mainTask(void *argument)
         _eps_sensors.battery_temperature[i].data_state = EPS_DATA_CONSUMED;
       }
       local_eps_state = EPS_DATA_CONSUMED;
+
+      eps_beacon_len = eps_pack_sensor_data(eps_beacon_buf,sizeof(_eps_sensors),&_eps_sensors);
+ 
+    }
+
+    if (millis - beacon_timeNow > beacon_interval){
+      uint8_t date_time_buf[32] = {0};
+      rv3028c7_pack_datetime(&_obc_sensors.datetime,date_time_buf);
+      uint8_t date_time_buf_len = 6;
+
+      uint8_t temperature_buf[4];
+      uint8_t temperature_buf_len = tmp1075_pack_temperature(_obc_sensors.temp,temperature_buf);
+
+      uint8_t beacon_packet[MAX_BEACON_PACKET_SIZE] = {0};
+      uint16_t current_idx = 0U;
+      (void)memcpy(&beacon_packet[current_idx], (const void *)eps_beacon_buf, sizeof(_eps_sensors));
+      current_idx += (uint16_t)eps_beacon_len;
+
+      /* Copy Date Time */
+      (void)memcpy(&beacon_packet[current_idx], (const void *)date_time_buf, (size_t)date_time_buf_len);
+      current_idx += (uint16_t)date_time_buf_len;
+
+      /* Copy Temperature */
+      (void)memcpy(&beacon_packet[current_idx], (const void *)temperature_buf, (size_t)temperature_buf_len);
+      current_idx += (uint16_t)temperature_buf_len;
+
+      (void)memcpy(beacon_content_buf,(const void *)beacon_packet,(size_t)current_idx);
+      beacon_content_len = current_idx;
+      if (beacon_content_len > 0){
+        printf("Broadcast beacon len : %d\r\n",beacon_content_len);
+        uint8_t beacon_kiss[200];
+        uint8_t beacon_kiss_len = KISS_Encode(beacon_content_buf,beacon_content_len,beacon_kiss);
+        HAL_UART_Transmit_IT(&COM_UART,beacon_kiss,beacon_kiss_len);
+        beacon_content_len = 0;
+      }
+      beacon_timeNow = millis;
     }
 
     // }
@@ -1313,7 +1375,7 @@ void usbTask(void *argument)
   /* Infinite loop */
     usb_data_t usb_data_rx = { .is_new_message = 0, .len = 0 };
     uint32_t current_offset = 0;
-    uint16_t payload_len = 0;
+    // uint16_t payload_len = 0;
     uint16_t current_chunk = 0;
 
     kiss_frame_t decoded_payload = { .content = payload_content };
@@ -1325,8 +1387,10 @@ void usbTask(void *argument)
     FIL fil; 		//File handle
     FRESULT fres; //Result after operations
 
+
     for (;;)
     {
+
         osStatus_t status = osMessageQueueGet(cdcDataQueueHandle,
                                              (void *)&usb_data_rx,
                                              NULL, osWaitForever);
@@ -1617,17 +1681,29 @@ void uartRx(void *argument)
     /* Arm the very first receive — do it here, not in mainTask */
     HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
   /* Infinite loop */
-  for(;;)
-  {
-     for (;;)
+
+    commu_state communication_state = COMMU_RX_IDLE;
+    
+    for(;;)
     {
         /* Block until the idle-line ISR signals a chunk arrived */
         osStatus_t status = osMessageQueueGet(communicationUartQueueHandle,
-                                              &chunk_len, NULL, osWaitForever);
-        if (status != osOK) continue;
+                                              &chunk_len, NULL, COMMU_RX_TIMEOUT);
+        // if (status != osOK) continue;
+        if (status == osErrorTimeout){
+          if (communication_state == COMMU_RX_ONGOING){
+            printf("Hanging RX Buffer for too long, Resetting\r\n");
+            communication_state = COMMU_RX_IDLE;
+            commu_offset = 0;
+          }
+          continue;
+        }
 
+        communication_state = COMMU_RX_ONGOING;
+
+        // else if (status == osOK)
         /* --- Re-arm RX immediately so we don't miss the next bytes --- */
-        HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
+        // HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
 
         /* --- Overflow guard --- */
         if ((commu_offset + chunk_len) > COMMU_BUF_SIZE)
@@ -1673,7 +1749,6 @@ void uartRx(void *argument)
 
         /* Reset accumulator for the next frame */
         commu_offset = 0;
-    }
   }
   /* USER CODE END uartRx */
 }
