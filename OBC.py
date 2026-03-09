@@ -1,5 +1,9 @@
 import serial
 import struct
+import os
+
+SD_CARD_DIR = "sd_card"
+os.makedirs(SD_CARD_DIR, exist_ok=True)
 import time
 import random
 
@@ -105,6 +109,9 @@ def main():
                                 else:
                                     print("  -> Routing to: Unknown Subsystem!")
                                 
+                                # Use the data already parsed from the incoming Request
+                                req_data = data
+
                                 # Emulate sending a response back to GS
                                 seq_counter = (seq_counter + 1) % 256
                                 
@@ -112,25 +119,50 @@ def main():
                                 dummy_data = b''
                                 if p_id == OBC_SUBSYSTEM:
                                     if pid == 0x00: # List Files
-                                        files = [b"image_01.jpg", b"telemetry.csv", b"log.txt"]
-                                        dummy_data = struct.pack('>B', len(files)) # NumFiles
-                                        for f in files:
-                                            dummy_data += struct.pack('>B', len(f)) + f # Len + Name
+                                        try:
+                                            files = os.listdir(SD_CARD_DIR)[:255] # limit to 1 byte count
+                                            dummy_data = struct.pack('>B', len(files))
+                                            for f in files:
+                                                fb = f.encode('utf-8')
+                                                dummy_data += struct.pack('>B', len(fb)) + fb
+                                        except Exception as e:
+                                            dummy_data = struct.pack('>B', 0)
                                             
                                     elif pid == 0x01: # File Info
-                                        dummy_data = struct.pack('>BII', 
-                                            0x00,          # Status: 0x00 OK
-                                            25165824,      # FileSize: ~24MB
-                                            1772722800     # CreatedTs: epoch
-                                        )
-                                        
+                                        if len(req_data) >= 1:
+                                            name_len = req_data[0]
+                                            fname = req_data[1:1+name_len].decode('utf-8')
+                                            fpath = os.path.join(SD_CARD_DIR, fname)
+                                            if os.path.exists(fpath):
+                                                sz = os.path.getsize(fpath)
+                                                ct = int(os.path.getctime(fpath))
+                                                dummy_data = struct.pack('>BII', 0x00, sz, ct)
+                                            else:
+                                                dummy_data = struct.pack('>BII', 0x01, 0, 0)
+                                        else:
+                                            dummy_data = struct.pack('>BII', 0x01, 0, 0)
+                                            
                                     elif pid == 0x02: # File Data (Chunk)
-                                        chunk = b'\\xFF\\xD8\\xFF\\xE0\\x00\\x10JFIF' # 10 byte jpeg header
-                                        dummy_data = struct.pack('>BIH', 
-                                            0x00,          # Status: OK
-                                            0,             # Offset: 0
-                                            len(chunk)     # ActualDataLength (uint16)
-                                        ) + chunk
+                                        if len(req_data) >= 1:
+                                            name_len = req_data[0]
+                                            fname = req_data[1:1+name_len].decode('utf-8')
+                                            fpath = os.path.join(SD_CARD_DIR, fname)
+                                            if len(req_data) >= 1 + name_len + 6:
+                                                offset, r_len = struct.unpack('>IH', req_data[1+name_len : 1+name_len+6])
+                                                if os.path.exists(fpath):
+                                                    try:
+                                                        with open(fpath, 'rb') as f:
+                                                            f.seek(offset)
+                                                            chunk = f.read(r_len)
+                                                            dummy_data = struct.pack('>BIH', 0x00, offset, len(chunk)) + chunk
+                                                    except:
+                                                        dummy_data = struct.pack('>BIH', 0x01, offset, 0)
+                                                else:
+                                                    dummy_data = struct.pack('>BIH', 0x01, offset, 0)
+                                            else:
+                                                dummy_data = struct.pack('>BIH', 0x01, 0, 0)
+                                        else:
+                                            dummy_data = struct.pack('>BIH', 0x01, 0, 0)
 
                                 elif p_id == VR_SUBSYSTEM:
                                     if pid == 0x00: # Pi Status
