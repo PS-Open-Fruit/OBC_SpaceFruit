@@ -56,7 +56,17 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
 
 #### 1. SD Card (PayloadID: `0x00`)
 
-**Request List files (SD) `(PID: 0x00)`**
+**Request Ping `(PID: 0x00)`**
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+
+**Request List files (SD) `(PID: 0x01)`**
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -66,7 +76,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- | :--- | :--- |
     | 1B | 1B | N |
 
-**Request File Info (SD) `(PID: 0x01)`**
+**Request File Info (SD) `(PID: 0x02)`**
 *   **Request (Dynamic Length):**
     | Filename Length | Filename ASCII |
     | :--- | :--- |
@@ -76,7 +86,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- | :--- | :--- |
     | 1B | 4B | 4B |
 
-**Request File Data `(PID: 0x02)`**
+**Request File Data `(PID: 0x03)`**
 *   **Request (Dynamic Length):**
     | Filename Length | Filename ASCII | FileOffset (uint32) | ChunkLength (uint16) |
     | :--- | :--- | :--- | :--- |
@@ -88,7 +98,17 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
 
 #### 2. VR Payload / Pi Zero (PayloadID: `0x01`)
 
-**Request Pi Status `(PID: 0x00)`**
+**Request Ping `(PID: 0x00)`**
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+
+**Request Pi Status `(PID: 0x01)`**
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -98,7 +118,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
     | 4B | 4B | 1B | 1B | 1B | 1B | 1B | 3B |
 
-**Request Capture `(PID: 0x01)`**
+**Request Capture `(PID: 0x02)`**
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -108,7 +128,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- | :--- | :--- |
     | 1B | 1B | N |
 
-**Request Copy Image to SD `(PID: 0x02)`**
+**Request Copy Image to SD `(PID: 0x03)`**
 *   **Request (Dynamic Length):**
     | Filename Length | Filename ASCII |
     | :--- | :--- |
@@ -129,13 +149,16 @@ The GS and OBC scripts contain multithreaded emulators that allow you to test th
 
 **GS CLI Interface:**
 ```
---- Command Line Interface ---
+--- Ground Station CLI ---
+Type 'help' for a list of available commands.
+GS> help
 Commands:
-  0: Request List files (SD)
-  1: Request File Info (SD)
-  2: Request File Data (SD)
-  3: Request Pi Status (VR)
-  4: Request Capture (VR)
-Type the number and press Enter to send.
+  ping <obc/vr>         - Ping subsystem
+  list                  - List files on OBC SD card
+  info <filename>       - Request file info
+  download <filename>   - Download file from OBC
+  status                - Request Pi Status
+  capture               - Request Image Capture
+  exit                  - Exit Ground Station
+GS> 
 ```
-*Depending on the command chosen (like requesting file info), the CLI will dynamically prompt you for the specific parameters (File Name, Chunk Offset) needed to build the packed binary request.*
