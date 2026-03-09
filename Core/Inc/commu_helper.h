@@ -5,11 +5,28 @@
 #define COMMU_RX_SIZE     64
 #define COMMU_BUF_SIZE   256   // accumulation buffer, large enough for multi-chunk frames
 #define UART_MUTEX_TIMEOUT 1000
-
+#define BASIC_COMMU_FRAME_LEN 9
 typedef enum{
       COMMU_RX_IDLE,
       COMMU_RX_ONGOING,
 } commu_state;
+
+typedef enum {
+    COMMU_VALID_DATA = 0,
+    COMMU_VALID_CMD  = 1,
+    COMMU_ERR_EMPTY  = -1,
+    COMMU_ERR_PORT   = -2,
+    COMMU_ERR_TYPE   = -3,
+    COMMU_ERR_FRAMING = -4,
+    COMMU_ERR_CRC    = -5  // Added for CRC validation
+} commu_status_t;
+
+typedef struct {
+    uint8_t seq_num; 
+    uint8_t payload_id; 
+    uint8_t pid; 
+} commu_header_t;
+
 static uint8_t commu_temp_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
 static uint8_t commu_data_buff[COMMU_BUF_SIZE];  // accumulation buffer
 static uint16_t commu_offset = 0;                // how many bytes accumulated so far
@@ -33,7 +50,7 @@ const osMutexAttr_t uartMutex_attributes = {
 };
 
 uint16_t commu_encode(uint8_t seq_num, uint8_t payload_id, uint8_t pid, 
-                     const uint8_t *input_buffer, uint16_t input_len, 
+                      uint16_t input_len, const uint8_t *input_buffer, 
                      uint8_t *output_buffer, uint16_t max_output_len) {
     
     if (5 + input_len + 4 > max_output_len) {
@@ -61,6 +78,24 @@ uint16_t commu_encode(uint8_t seq_num, uint8_t payload_id, uint8_t pid,
     output_buffer[index++] = (uint8_t)(crc & 0xFF);
 
     return index;
+}
+
+commu_status_t commu_decode_get_header(uint8_t *input_buf, uint16_t input_len,commu_header_t *header){
+    if (input_len < BASIC_COMMU_FRAME_LEN){
+      return COMMU_ERR_FRAMING;
+    }
+    uint32_t crc = KISS_CalculateCRC32(input_buf,input_len - 4);
+    uint32_t crc_in = (input_buf[input_len - 1] >> 24) & 0xFF |
+                      (input_buf[input_len - 2] >> 16) & 0xFF |
+                      (input_buf[input_len - 3] >> 8) & 0xFF |
+                      input_buf[input_len - 4] & 0xFF;
+    if (crc != crc_in){
+      return COMMU_ERR_CRC;
+    }
+    header->seq_num = input_buf[0];
+    header->payload_id = input_buf[1];
+    header->pid = input_buf[2];
+    return COMMU_VALID_DATA;
 }
 
 void commu_init(){
