@@ -52,31 +52,39 @@ def cli_thread():
             
             if cmd == 'help':
                 print("Commands:")
+                print("  ping <obc/vr>         - Ping subsystem")
                 print("  list                  - List files on OBC SD card")
                 print("  info <filename>       - Request file info")
                 print("  download <filename>   - Download file from OBC")
                 print("  status                - Request Pi Status")
                 print("  capture               - Request Image Capture")
                 print("  exit                  - Exit Ground Station")
+            elif cmd == 'ping':
+                if len(parts) > 1 and parts[1].lower() == 'obc':
+                    command_queue.put(('MANUAL', 0x00, 0x00, "Request Ping (OBC)", b''))
+                elif len(parts) > 1 and parts[1].lower() == 'vr':
+                    command_queue.put(('MANUAL', 0x01, 0x00, "Request Ping (VR)", b''))
+                else:
+                    print("Usage: ping <obc|vr>")
             elif cmd == 'list':
-                command_queue.put(('MANUAL', 0x00, 0x00, "Request List files (SD)", b''))
+                command_queue.put(('MANUAL', 0x00, 0x01, "Request List files (SD)", b''))
             elif cmd == 'info':
                 if len(parts) > 1:
                     fname = parts[1].encode()
                     req_data = struct.pack('>B', len(fname)) + fname
-                    command_queue.put(('MANUAL', 0x00, 0x01, "Request File Info (SD)", req_data))
+                    command_queue.put(('MANUAL', 0x00, 0x02, "Request File Info (SD)", req_data))
                 else:
                     print("Usage: info <filename>")
             elif cmd == 'download':
                 if len(parts) > 1:
                     fname = parts[1]
-                    command_queue.put(('AUTO_DOWNLOAD', 0x00, 0x02, "Request File Data (SD)", fname))
+                    command_queue.put(('AUTO_DOWNLOAD', 0x00, 0x03, "Request File Data (SD)", fname))
                 else:
                     print("Usage: download <filename>")
             elif cmd == 'status':
-                command_queue.put(('MANUAL', 0x01, 0x00, "Request Pi Status (VR)", b''))
+                command_queue.put(('MANUAL', 0x01, 0x01, "Request Pi Status (VR)", b''))
             elif cmd == 'capture':
-                command_queue.put(('MANUAL', 0x01, 0x01, "Request Capture (VR)", b''))
+                command_queue.put(('MANUAL', 0x01, 0x02, "Request Capture (VR)", b''))
             elif cmd == 'exit':
                 print("Exiting...")
                 os._exit(0)
@@ -126,6 +134,7 @@ def main():
     last_request_time = 0.0
     retry_count = 0
     MAX_RETRIES = 5
+    ping_send_time = 0.0
     
     print("\n[GS] Starting RX/TX Loops...")
     
@@ -149,7 +158,7 @@ def main():
                 print(f"\n[GS] --- Starting Automated Download for '{fname}' ---")
                 # Request File Info first to determine file size
                 req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes
-                command_queue.put(('PRE_DOWNLOAD_INFO', 0x00, 0x01, "Auto-Request File Info", req_data))
+                command_queue.put(('PRE_DOWNLOAD_INFO', 0x00, 0x02, "Auto-Request File Info", req_data))
                 continue
                 
             elif len(item) == 5 and item[0] in ['MANUAL', 'PRE_DOWNLOAD_INFO']:
@@ -165,6 +174,9 @@ def main():
             custom_payload = build_custom_payload(target_p_id, target_pid, 0x00, req_data) 
             req_frame = KISSProtocol.wrap_frame(custom_payload, command=0x00)
             
+            if target_pid == 0x00: # Ping
+                ping_send_time = time.time()
+            
             print("  Color Legend: \033[90mFEND\033[0m \033[95mCMD\033[0m \033[94mSEQ\033[0m \033[93mPL_ID\033[0m \033[96mPID\033[0m \033[92mLEN\033[0m \033[97mDATA\033[0m \033[91mCRC\033[0m \033[90mFEND\033[0m")
             print(f"  -> TX Raw Frame: {colorize_raw_frame(req_frame)}")
             ser.write(req_frame)
@@ -179,7 +191,7 @@ def main():
                 if retry_count < MAX_RETRIES:
                     print(f"     \033[93m[GS] Timeout waiting for offset {dl_offset}. Retrying {retry_count + 1}/{MAX_RETRIES}...\033[0m")
                     req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
-                    command_queue.put(('MANUAL', 0x00, 0x02, "Auto-Request Chunk Retry", req_data))
+                    command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request Chunk Retry", req_data))
                     last_request_time = time.time()
                     retry_count += 1
                 else:
@@ -207,7 +219,11 @@ def main():
                                 print(f"  <- Received Response [PayloadID: 0x{p_id:02X}, PID: 0x{pid:02X}, Seq: {seq}]")
                                 try:
                                     if p_id == 0x00:
-                                        if pid == 0x00: # List Files
+                                        if pid == 0x00: # Ping
+                                            delay = (time.time() - ping_send_time) * 1000
+                                            print(f"     Ping Response from OBC Received! time={delay:.1f}ms")
+                                            
+                                        elif pid == 0x01: # List Files
                                             num_files = data[0]
                                             print(f"     Found {num_files} files:")
                                             offset = 1
@@ -217,7 +233,7 @@ def main():
                                                 print(f"       - {name}")
                                                 offset += 1 + name_len
                                                 
-                                        elif pid == 0x01: # File Info
+                                        elif pid == 0x02: # File Info
                                             status, size, ts = struct.unpack('>BII', data)
                                             s_str = "OK" if status == 0 else "Error"
                                             print(f"     Status: {s_str} | Size: {size} bytes | Created: {ts}")
@@ -228,12 +244,12 @@ def main():
                                                     dl_start_time = time.time()
                                                     print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
                                                     req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
-                                                    command_queue.put(('MANUAL', 0x00, 0x02, "Auto-Request Chunk", req_data))
+                                                    command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request Chunk", req_data))
                                                 else:
                                                     print(f"     \033[91m[GS] Target file not found. Auto-download aborted.\033[0m")
                                                     dl_active = False
                                             
-                                        elif pid == 0x02: # File Data
+                                        elif pid == 0x03: # File Data
                                             status, offset, dl = struct.unpack('>BIH', data[:7])
                                             chunk = data[7:7+dl]
                                             print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
@@ -271,7 +287,7 @@ def main():
                                                         # print(f"     [GS] Auto-Requesting next chunk at offset {dl_offset}...")
                                                         time.sleep(0.05) # critical delay to let AS-32 hardware buffer clear
                                                         req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
-                                                        command_queue.put(('MANUAL', 0x00, 0x02, "Auto-Request Chunk", req_data))
+                                                        command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request Chunk", req_data))
                                                     elif dl_active and dl < dl_chunk_size:
                                                         elapsed_time = time.time() - dl_start_time
                                                         avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 and dl_total_size > 0 else 0
@@ -289,12 +305,16 @@ def main():
                                                     dl_active = False
                                             
                                     elif p_id == 0x01:
-                                        if pid == 0x00: # Pi Status
+                                        if pid == 0x00: # Ping
+                                            delay = (time.time() - ping_send_time) * 1000
+                                            print(f"     Ping Response from VR Received! time={delay:.1f}ms")
+                                            
+                                        elif pid == 0x01: # Pi Status
                                             ts, up, cpu_l, cpu_t, ram, disk, cam = struct.unpack('>IIBbBBB3x', data)
                                             cam_str = {0:"Err", 1:"Ready", 2:"Busy"}.get(cam, "Unknown")
                                             print(f"     Pi Status -> Time: {ts} | Up: {up}s | CPU: {cpu_l}% ({cpu_t}C) | RAM: {ram}% | Disk: {disk}% | CAM: {cam_str}")
                                             
-                                        elif pid == 0x01: # Capture
+                                        elif pid == 0x02: # Capture
                                             status, name_len = struct.unpack('>BB', data[:2])
                                             name = data[2:2+name_len].decode()
                                             print(f"     Capture -> Status: {status} | File: {name}")

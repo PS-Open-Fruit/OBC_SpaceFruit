@@ -95,16 +95,18 @@ def main():
                                 # --- ROUTING LOGIC ---
                                 if p_id == OBC_SUBSYSTEM:
                                     print("  -> Routing to: OBC Subsystem (SD Card)")
-                                    if pid == 0x00: print("  -> Action: Request List files")
-                                    elif pid == 0x01: print("  -> Action: Request File Info")
-                                    elif pid == 0x02: print("  -> Action: Request File Data")
+                                    if pid == 0x00: print("  -> Action: Request Ping")
+                                    elif pid == 0x01: print("  -> Action: Request List files")
+                                    elif pid == 0x02: print("  -> Action: Request File Info")
+                                    elif pid == 0x03: print("  -> Action: Request File Data")
                                     else: print("  -> Action: Unknown OBC Command")
                                         
                                 elif p_id == VR_SUBSYSTEM:
                                     print("  -> Routing to: VR Payload Subsystem")
-                                    if pid == 0x00: print("  -> Action: Request Pi Status")
-                                    elif pid == 0x01: print("  -> Action: Request Capture")
-                                    elif pid == 0x02: print("  -> Action: Request Copy Image to SD")
+                                    if pid == 0x00: print("  -> Action: Request Ping")
+                                    elif pid == 0x01: print("  -> Action: Request Pi Status")
+                                    elif pid == 0x02: print("  -> Action: Request Capture")
+                                    elif pid == 0x03: print("  -> Action: Request Copy Image to SD")
                                     else: print("  -> Action: Unknown VR Command")
                                 else:
                                     print("  -> Routing to: Unknown Subsystem!")
@@ -118,7 +120,10 @@ def main():
                                 # Generate specific dummy binary data based on the Request
                                 dummy_data = b''
                                 if p_id == OBC_SUBSYSTEM:
-                                    if pid == 0x00: # List Files
+                                    if pid == 0x00: # Ping
+                                        dummy_data = b''
+                                        
+                                    elif pid == 0x01: # List Files
                                         try:
                                             files = os.listdir(SD_CARD_DIR)[:255] # limit to 1 byte count
                                             dummy_data = struct.pack('>B', len(files))
@@ -128,7 +133,7 @@ def main():
                                         except Exception as e:
                                             dummy_data = struct.pack('>B', 0)
                                             
-                                    elif pid == 0x01: # File Info
+                                    elif pid == 0x02: # File Info
                                         if len(req_data) >= 1:
                                             name_len = req_data[0]
                                             fname = req_data[1:1+name_len].decode('utf-8')
@@ -142,7 +147,7 @@ def main():
                                         else:
                                             dummy_data = struct.pack('>BII', 0x01, 0, 0)
                                             
-                                    elif pid == 0x02: # File Data (Chunk)
+                                    elif pid == 0x03: # File Data (Chunk)
                                         if len(req_data) >= 1:
                                             name_len = req_data[0]
                                             fname = req_data[1:1+name_len].decode('utf-8')
@@ -165,7 +170,10 @@ def main():
                                             dummy_data = struct.pack('>BIH', 0x01, 0, 0)
 
                                 elif p_id == VR_SUBSYSTEM:
-                                    if pid == 0x00: # Pi Status
+                                    if pid == 0x00: # Ping
+                                        dummy_data = b''
+                                        
+                                    elif pid == 0x01: # Pi Status
                                         dummy_data = struct.pack('>IIBbBBB3x',
                                             1772722800, # Timestamp (uint32)
                                             3600,       # Uptime seconds (uint32)
@@ -176,7 +184,7 @@ def main():
                                             0x01        # CameraStatus: Ready (uint8)
                                         )
                                         
-                                    elif pid == 0x01: # Capture
+                                    elif pid == 0x02: # Capture
                                         filename = b"image_02.jpg"
                                         dummy_data = struct.pack('>BB', 0x00, len(filename)) + filename
                                         
