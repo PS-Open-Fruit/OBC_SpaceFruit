@@ -128,7 +128,7 @@ osThreadId_t uartRxTaskHandle;
 const osThreadAttr_t uartRxTask_attributes = {
   .name = "uartRxTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
+  .priority = (osPriority_t) osPriorityAboveNormal7,
 };
 /* Definitions for cdcDataQueue */
 osMessageQueueId_t cdcDataQueueHandle;
@@ -162,15 +162,29 @@ const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
+
+#define DATA_POLLING_INTERVAL 1000
+#define BEACON_INTERVAL 10000
+
 const uint32_t COMMU_RX_TIMEOUT = 3000;
 #define MAX_BEACON_PACKET_SIZE 256U
-typedef enum {
-  SYSTEM_STATE_BEACON,
-  SYSTEM_STATE_DOWNLINK,
-} satellite_state;
 
-satellite_state system_state = SYSTEM_STATE_BEACON;
-const uint32_t beacon_interval = 10000;
+
+#define SYSTEM_STATE_BEACON         0x00000001U
+#define SYSTEM_STATE_DOWNLINK       0x00000002U
+#define SYSTEM_STATE_ALL            0x0FFFFFFFU
+
+osEventFlagsId_t systemStateFlagHandle;
+const osEventFlagsAttr_t systemStateFlag_attr = {
+  .name = "systemStateFlag"
+};
+
+typedef enum{
+      PAYLOAD_STATE_IDLE,
+      PAYLOAD_STATE_RX,
+} payload_state;
+
+#define PAYLOAD_RX_TIMEOUT 1000
 
 
 uint8_t eps_state = EPS_DATA_NO_DATA;
@@ -373,6 +387,7 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_EVENTS */
   payloadFlagHandle = osEventFlagsNew(&payloadFlag_attr);
+  systemStateFlagHandle = osEventFlagsNew(&systemStateFlag_attr);
   /* add events, ... */
   /* USER CODE END RTOS_EVENTS */
 
@@ -1181,148 +1196,115 @@ void mainTask(void *argument)
   uint8_t beacon_content_buf[MAX_BEACON_PACKET_SIZE] = {0};
   uint16_t beacon_content_len = 0;
   uint32_t beacon_timeNow = 0;
-  satellite_state local_state = SYSTEM_STATE_BEACON;
+  osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_ALL);
+  osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+
+  uint32_t data_polling_timeNow = 0;
+  uint32_t local_state;
   for(;;)
   {
-    osMutexAcquire(systemStateMutexHandle,1000);
-    local_state = system_state;
-    osMutexRelease(systemStateMutexHandle);
+    local_state = osEventFlagsGet(systemStateFlagHandle);
     uint32_t ticks = osKernelGetTickCount();
     uint32_t freq  = osKernelGetTickFreq();
 
       // Convert ticks to milliseconds
     uint32_t millis = (ticks * 1000U) / freq;
 
-    sensors_data_ready = 0;
-    HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
-    osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
-    if (os_ret != osOK){
-      printf("Aquire OBC Sensor error\r\n");
-    }
-    else{
-      _obc_sensors.temp = obc_sensors_data.temp;
-      _obc_sensors.datetime = datetime;
-      _eps_sensors = eps_sensors_data;
-      sensors_data_ready = 1;
-      local_eps_state = eps_state;
-      eps_state = EPS_DATA_CONSUMED;
-      osMutexRelease(sensorsMutexHandle);
-    }
-    if (!sensors_data_ready){
-      continue;
-    }
-    printf("Temperature : %ld\r\n", _obc_sensors.temp);
-    printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
+    if (millis - data_polling_timeNow > DATA_POLLING_INTERVAL){
+        sensors_data_ready = 0;
+        HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
+        osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
+        if (os_ret != osOK){
+            printf("Aquire OBC Sensor error\r\n");
+        }
+        else{
+            _obc_sensors.temp = obc_sensors_data.temp;
+            _obc_sensors.datetime = datetime;
+            _eps_sensors = eps_sensors_data;
+            sensors_data_ready = 1;
+            local_eps_state = eps_state;
+            eps_state = EPS_DATA_CONSUMED;
+            osMutexRelease(sensorsMutexHandle);
+        }
+    // if (!sensors_data_ready){
+    //   continue;
+    // }
+    // printf("Temperature : %ld\r\n", _obc_sensors.temp);
+    // printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
 
-    if (osMutexAcquire(uartMutexHandle,UART_MUTEX_TIMEOUT) == osOK){
-      if (commu_data_ready){
-        commu_data_ready = 0;
-        printf("commu ready\r\n");
-        memcpy(temp_commu_data_buff,commu_data_buff,commu_size);
-        uint16_t buff_size = commu_size;
-        kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
-        
-        printf("ret = %d\r\n",status_kiss);
-        if (status_kiss == KISS_VALID_DATA){
-          printf("Valid commu data\r\n");
-          if (output_frame.payload_id == KISS_PAYLOAD_ID_VR && output_frame.pid == KISS_VR_PID_IMAGE_REQUEST){
-            osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
-            printf("Download image command\r\n");
-            uint8_t ack_msg[32] = {0x00,0xAC};
-            uint16_t ack_len = 0;
-            uint8_t msg[32] = {0};
-            ack_len = KISS_Encode(ack_msg,2,msg);
-            printf("ACK to COMMU\r\n");
-            HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
+      if (local_eps_state == EPS_DATA_OK){
+        for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
+          uint8_t channel = _eps_sensors.vi_sensor[i].channel;
+          int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
+          int16_t current = _eps_sensors.vi_sensor[i].current;
+          eps_data_state data_state = _eps_sensors.vi_sensor[i].data_state;
+          if (data_state == EPS_DATA_OK){
+            // printf("VI Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
           }
+          _eps_sensors.vi_sensor[i].data_state = EPS_DATA_CONSUMED;
         }
+    
+        for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+          uint8_t channel = _eps_sensors.output_sensor[i].channel;
+          int16_t voltage = _eps_sensors.output_sensor[i].voltage;
+          int16_t current = _eps_sensors.output_sensor[i].current;
+          eps_data_state data_state = _eps_sensors.output_sensor[i].data_state;
+          if (data_state == EPS_DATA_OK){
+            // printf("Output Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
+          }
+          _eps_sensors.output_sensor[i].data_state = EPS_DATA_CONSUMED;
+        }
+    
+        for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
+          uint8_t channel = _eps_sensors.output_state[i].channel;
+          uint8_t status = _eps_sensors.output_state[i].status;
+          eps_data_state data_state = _eps_sensors.output_state[i].data_state;
+          if (data_state != EPS_DATA_OK){
+            continue;
+          }
+          // printf("Output State CH %d, State %d\r\n",channel,status);
+          _eps_sensors.output_state[i].data_state = EPS_DATA_CONSUMED;
+        }
+    
+        for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
+          uint8_t channel = _eps_sensors.battery_temperature[i].channel;
+          int16_t temp = _eps_sensors.battery_temperature[i].temperature * 1000;
+          eps_data_state data_state = _eps_sensors.battery_temperature[i].data_state;
+          if (data_state != EPS_DATA_OK){
+            continue;
+          }
+          // printf("Battery Temperature CH %d, Temperature %d State %d\r\n",channel,temp,data_state);
+          _eps_sensors.battery_temperature[i].data_state = EPS_DATA_CONSUMED;
+        }
+        local_eps_state = EPS_DATA_CONSUMED;
+
+        eps_beacon_len = eps_pack_sensor_data(eps_beacon_buf,sizeof(_eps_sensors),&_eps_sensors);
+
       }
-      osMutexRelease(uartMutexHandle);
+
+
+      data_polling_timeNow = millis;
+      // printf("\r\n");
     }
 
-    if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
-      uint8_t cmd_encoded[32] = {0};
-      uint8_t request_content[3] = {0x00,0xFF,0xFF};
-      uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content,3,KISS_CMD_DATA, cmd_encoded);
-      osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
-      osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
-      CDC_Transmit_FS(cmd_encoded,req_len);
-      printf("KISS Frame Encoded : ");
-      for (int i = 0; i < req_len;i++){
-        printf("0x%02X ",cmd_encoded[i]);
-      }
-      printf("\r\n");
-    }
-
-    if (local_eps_state == EPS_DATA_OK && local_state == SYSTEM_STATE_BEACON){
-  
-      for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
-        uint8_t channel = _eps_sensors.vi_sensor[i].channel;
-        int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
-        int16_t current = _eps_sensors.vi_sensor[i].current;
-        eps_data_state data_state = _eps_sensors.vi_sensor[i].data_state;
-        if (data_state == EPS_DATA_OK){
-          printf("VI Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
-        }
-        _eps_sensors.vi_sensor[i].data_state = EPS_DATA_CONSUMED;
-      }
-  
-      for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
-        uint8_t channel = _eps_sensors.output_sensor[i].channel;
-        int16_t voltage = _eps_sensors.output_sensor[i].voltage;
-        int16_t current = _eps_sensors.output_sensor[i].current;
-        eps_data_state data_state = _eps_sensors.output_sensor[i].data_state;
-        if (data_state == EPS_DATA_OK){
-          printf("Output Sensor CH %d, Volage : %dmV, Current %dmA\r\n",channel,voltage,current);
-        }
-        _eps_sensors.output_sensor[i].data_state = EPS_DATA_CONSUMED;
-      }
-  
-      for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
-        uint8_t channel = _eps_sensors.output_state[i].channel;
-        uint8_t status = _eps_sensors.output_state[i].status;
-        eps_data_state data_state = _eps_sensors.output_state[i].data_state;
-        if (data_state != EPS_DATA_OK){
-          continue;
-        }
-        printf("Output State CH %d, State %d\r\n",channel,status);
-        _eps_sensors.output_state[i].data_state = EPS_DATA_CONSUMED;
-      }
-  
-      for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
-        uint8_t channel = _eps_sensors.battery_temperature[i].channel;
-        int16_t temp = _eps_sensors.battery_temperature[i].temperature * 1000;
-        eps_data_state data_state = _eps_sensors.battery_temperature[i].data_state;
-        if (data_state != EPS_DATA_OK){
-          continue;
-        }
-        printf("Battery Temperature CH %d, Temperature %d State %d\r\n",channel,temp,data_state);
-        _eps_sensors.battery_temperature[i].data_state = EPS_DATA_CONSUMED;
-      }
-      local_eps_state = EPS_DATA_CONSUMED;
-
-      eps_beacon_len = eps_pack_sensor_data(eps_beacon_buf,sizeof(_eps_sensors),&_eps_sensors);
- 
-    }
-
-    if (millis - beacon_timeNow > beacon_interval){
+    if ((millis - beacon_timeNow > BEACON_INTERVAL) && (local_state & SYSTEM_STATE_BEACON)){
+      printf("It's beacon time %ld\r\n",local_state);
       uint8_t date_time_buf[32] = {0};
       rv3028c7_pack_datetime(&_obc_sensors.datetime,date_time_buf);
-      uint8_t date_time_buf_len = 6;
+      uint8_t date_time_buf_len = 7;
 
       uint8_t temperature_buf[4];
       uint8_t temperature_buf_len = tmp1075_pack_temperature(_obc_sensors.temp,temperature_buf);
 
       uint8_t beacon_packet[MAX_BEACON_PACKET_SIZE] = {0};
       uint16_t current_idx = 0U;
-      (void)memcpy(&beacon_packet[current_idx], (const void *)eps_beacon_buf, sizeof(_eps_sensors));
+      
+      (void)memcpy(&beacon_packet[current_idx], (const void *)eps_beacon_buf, (size_t)eps_beacon_len);
       current_idx += (uint16_t)eps_beacon_len;
 
-      /* Copy Date Time */
       (void)memcpy(&beacon_packet[current_idx], (const void *)date_time_buf, (size_t)date_time_buf_len);
       current_idx += (uint16_t)date_time_buf_len;
 
-      /* Copy Temperature */
       (void)memcpy(&beacon_packet[current_idx], (const void *)temperature_buf, (size_t)temperature_buf_len);
       current_idx += (uint16_t)temperature_buf_len;
 
@@ -1338,23 +1320,60 @@ void mainTask(void *argument)
       beacon_timeNow = millis;
     }
 
-    // }
+    if (osMutexAcquire(uartMutexHandle,UART_MUTEX_TIMEOUT) == osOK){
+      if (commu_data_ready){
+        commu_data_ready = 0;
+        printf("commu ready\r\n");
+        memcpy(temp_commu_data_buff,commu_data_buff,commu_size);
+        uint16_t buff_size = commu_size;
+        kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
+        
+        printf("ret = %d\r\n",status_kiss);
+        if (status_kiss == KISS_VALID_DATA){
+          printf("Valid commu data\r\n");
+          if (output_frame.payload_id){
+            switch (output_frame.pid)
+            {
+            case KISS_VR_PID_IMAGE_REQUEST:
+              osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+              printf("Download image command\r\n");
+              uint8_t ack_msg[32] = {0x00,0xAC};
+              uint16_t ack_len = 0;
+              uint8_t msg[32] = {0};
+              ack_len = KISS_Encode(ack_msg,2,msg);
+              printf("ACK to COMMU\r\n");
+              HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
+              break;
+            case KISS_VR_PID_IMAGE_CAPTURE:
+              break;
+            case KISS_VR_PID_IMAGE_DOWNLOAD:
+              break;
+            case KISS_VR_PID_IMAGE_DOWNLOAD_DONE:
+              break;
+              break;
+            default:
+              break;
+            }
+          }
+        }
+      }
+      osMutexRelease(uartMutexHandle);
+    }
 
-    // printf("Polling EPS through Flag...\r\n");
-    // osEventFlagsSet(epsFlagHandle,EPS_FLAG_POLL_START);
-    // uint32_t flag_ret = osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_SUCCESS | EPS_FLAG_POLL_ERROR, osFlagsWaitAny,1000);
-    // if (flag_ret & EPS_FLAG_POLL_SUCCESS){
-    //   printf("Main Thread : Poll Success\r\n");
-    // }
-    // else if (flag_ret & EPS_FLAG_POLL_ERROR){
-    //   printf("Main Thread : Poll Error\r\n");
-    // }
-    // else if (flag_ret & EVENT_FLAG_ERROR){
-    //   printf("Main Thread : No Response or Flag Error\r\n");
-    // }
+    if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
+      osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+      uint8_t cmd_encoded[32] = {0};
+      uint8_t request_content[3] = {0x00,0xFF,0xFF};
+      uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content,3,KISS_CMD_DATA, cmd_encoded);
+      CDC_Transmit_FS(cmd_encoded,req_len);
+      printf("KISS Frame Encoded : ");
+      for (int i = 0; i < req_len;i++){
+        printf("0x%02X ",cmd_encoded[i]);
+      }
+      printf("\r\n");
+      osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
+    }
 
-    printf("\r\n");
-    osDelay(1000);
   }
   // printf("It exits main task\r\n");
   /* USER CODE END 5 */
@@ -1387,16 +1406,26 @@ void usbTask(void *argument)
     FIL fil; 		//File handle
     FRESULT fres; //Result after operations
 
+    payload_state payload_commu_state = PAYLOAD_STATE_IDLE;
 
     for (;;)
     {
 
         osStatus_t status = osMessageQueueGet(cdcDataQueueHandle,
                                              (void *)&usb_data_rx,
-                                             NULL, osWaitForever);
+                                             NULL, PAYLOAD_RX_TIMEOUT);
 
           // printf("Queue Trigger\r\n");
-        if (status != osOK) continue;
+        if (status == osErrorTimeout){
+          if (payload_commu_state == PAYLOAD_STATE_RX){
+            printf("USB RX Timeout, Reset State...\r\n");
+            payload_commu_state = PAYLOAD_STATE_IDLE;
+            current_offset = 0;
+          }
+          continue;
+        }
+
+        payload_commu_state = PAYLOAD_STATE_RX;
         /* --- Accumulate --- */
         if ((current_offset + usb_data_rx.len) > sizeof(temp_buf))
         {
@@ -1444,20 +1473,17 @@ void usbTask(void *argument)
                                                     NULL, 0, 0x00, reply_frame);
                 CDC_Transmit_FS(reply_frame, reply_len);
                 // decoded_payload.file_id
-                fres = f_open(&fil,"image.jpg", FA_OPEN_APPEND | FA_WRITE);
+                fres = f_open(&fil,"0.jpg", FA_OPEN_APPEND | FA_WRITE);
                 if (fres != FR_OK) {
+
                     printf("open to append error (%i)\r\n", fres);
-                      while(1){
-                        osDelay(1);
-                      }
+                    continue;
                 }
                 unsigned int written = 0;
                 f_write(&fil,(void*)decoded_payload.content,decoded_payload.content_len,&written);
                 if (fres != FR_OK) {
                     printf("content append error (%i)\r\n", fres);
-                      while(1){
-                        osDelay(1);
-                      }
+                    continue;
                 }
                 // printf("written %d\r\n",written);
                 f_close(&fil);
@@ -1482,29 +1508,24 @@ void usbTask(void *argument)
                         //Open the file system
                     fres = f_mount(&FatFs, "", 1); //1=mount now
                     if (fres != FR_OK) {
-                    printf("f_mount error (%i)\r\n", fres);
-                      while(1){
-                        osDelay(1);
-                      }
+                      printf("f_mount error (%i)\r\n", fres);
+                      continue;
                     }
-                    fres = f_open(&fil,"image.jpg",FA_CREATE_ALWAYS);
-                    f_close(&fil);
+                    fres = f_open(&fil,"0.jpg",FA_CREATE_ALWAYS);
                     if (fres != FR_OK) {
-                    printf("create file error (%i)\r\n", fres);
-                      while(1){
-                        osDelay(1);
-                      }
+                      printf("create file error (%i)\r\n", fres);
+                      continue;
                     }
+                    f_close(&fil);
                 }
             }
             else if (decoded_payload.pid == KISS_VR_PID_IMAGE_DOWNLOAD_DONE){
               printf("Transfer Image Done\r\n");
+              payload_commu_state = PAYLOAD_STATE_IDLE;
               fres = f_mount(NULL, "", 0);
               if (fres != FR_OK) {
                 printf("unmount error (%i)\r\n", fres);
-                  while(1){
-                    osDelay(1);
-                  }
+                continue;
               }
             }
         }
@@ -1514,7 +1535,7 @@ void usbTask(void *argument)
 
 /* USER CODE BEGIN Header_wdtFeedTask */
 /**
- * @brief Function implementing the wdtFeed thread.
+//  * @brief Function implementing the wdtFeed thread.
  * @param argument: Not used
  * @retval None
  */
@@ -1740,6 +1761,7 @@ void uartRx(void *argument)
           commu_size = commu_offset;
           commu_data_ready = 1;
           osMutexRelease(uartMutexHandle);  
+          communication_state = COMMU_RX_IDLE;
           
         /* 
          * TODO: process commu_data_buff / commu_offset here.

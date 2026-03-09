@@ -1,5 +1,6 @@
 #include "main.h"
-
+#include "protocol_utils.h"
+#include "string.h"
 /* In your global/header section — replace the old commu vars */
 #define COMMU_RX_SIZE     64
 #define COMMU_BUF_SIZE   256   // accumulation buffer, large enough for multi-chunk frames
@@ -31,14 +32,39 @@ const osMutexAttr_t uartMutex_attributes = {
   .name = "uartMutex"
 };
 
-osMutexId_t systemStateMutexHandle;
-const osMutexAttr_t systemStateMutex_attributes = {
-  .name = "systemStateMutex"
-};
+uint16_t commu_encode(uint8_t seq_num, uint8_t payload_id, uint8_t pid, 
+                     const uint8_t *input_buffer, uint16_t input_len, 
+                     uint8_t *output_buffer, uint16_t max_output_len) {
+    
+    if (5 + input_len + 4 > max_output_len) {
+        return 0;
+    }
+
+    uint16_t index = 0;
+    output_buffer[index++] = seq_num;
+    output_buffer[index++] = payload_id;
+    output_buffer[index++] = pid;
+    
+    output_buffer[index++] = (uint8_t)(input_len >> 8);
+    output_buffer[index++] = (uint8_t)(input_len & 0xFF);
+
+    if (input_buffer != NULL && input_len > 0) {
+        memcpy(&output_buffer[index], input_buffer, input_len);
+        index += input_len;
+    }
+
+    uint32_t crc = KISS_CalculateCRC32(output_buffer, index);
+    
+    output_buffer[index++] = (uint8_t)(crc >> 24);
+    output_buffer[index++] = (uint8_t)(crc >> 16);
+    output_buffer[index++] = (uint8_t)(crc >> 8);
+    output_buffer[index++] = (uint8_t)(crc & 0xFF);
+
+    return index;
+}
 
 void commu_init(){
   commuSemaphoreHandle = osSemaphoreNew(1,0,&commuSemaphoreAttr);
   uartMutexHandle = osMutexNew(&uartMutex_attributes);
-  systemStateMutexHandle = osMutexNew(&systemStateMutex_attributes);
   communicationUartQueueHandle = osMessageQueueNew(16,sizeof(uint16_t),&communicationUartQueue_attributes);
 }
