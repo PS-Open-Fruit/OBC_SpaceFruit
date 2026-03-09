@@ -83,7 +83,9 @@ def generate_dummy_beacon_data() -> bytes:
         elif i == 3:
             b += struct.pack('>hhBB', 0, 512, i, 2)
         else:
-            b += struct.pack('>hhBB', 0, 0, i, 2)
+            v = random.randint(0, 50)
+            c = random.randint(0, 10)
+            b += struct.pack('>hhBB', v, c, i, 2)
             
     # 6 Output States ('>BBB') = 3 bytes each
     for i in range(6):
