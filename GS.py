@@ -8,6 +8,7 @@ current_download_file = "unknown.bin"
 import time
 import threading
 import queue
+from beacon_helper import *
 
 # Import your custom KISS protocol class
 from Shared.Python.kiss_protocol import KISSProtocol
@@ -210,7 +211,6 @@ def main():
                         print(f"  <- RX Raw Frame: {colorize_raw_frame(rx_buffer)}")
                         cmd, payload_bytes = unwrapped
                         parsed = parse_custom_payload(payload_bytes)
-                        
                         if parsed:
                             p_id, pid, seq, data = parsed
                             
@@ -220,10 +220,14 @@ def main():
                                 try:
                                     if p_id == 0x00:
                                         if pid == 0x00: # Ping
+                                            ret_beacon_dict = decode_beacon_packet(data)
+                                            print_decoded_beacon_data(ret_beacon_dict)
+
+                                        elif pid == 0x01: # Ping
                                             delay = (time.time() - ping_send_time) * 1000
                                             print(f"     Ping Response from OBC Received! time={delay:.1f}ms")
                                             
-                                        elif pid == 0x01: # List Files
+                                        elif pid == 0x02: # List Files
                                             num_files = data[0]
                                             print(f"     Found {num_files} files:")
                                             offset = 1
@@ -233,7 +237,7 @@ def main():
                                                 print(f"       - {name}")
                                                 offset += 1 + name_len
                                                 
-                                        elif pid == 0x02: # File Info
+                                        elif pid == 0x03: # File Info
                                             status, size, ts = struct.unpack('>BII', data)
                                             s_str = "OK" if status == 0 else "Error"
                                             print(f"     Status: {s_str} | Size: {size} bytes | Created: {ts}")
@@ -249,7 +253,7 @@ def main():
                                                     print(f"     \033[91m[GS] Target file not found. Auto-download aborted.\033[0m")
                                                     dl_active = False
                                             
-                                        elif pid == 0x03: # File Data
+                                        elif pid == 0x04: # File Data
                                             status, offset, dl = struct.unpack('>BIH', data[:7])
                                             chunk = data[7:7+dl]
                                             print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
