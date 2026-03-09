@@ -1288,7 +1288,6 @@ void mainTask(void *argument)
     }
 
     if ((millis - beacon_timeNow > BEACON_INTERVAL) && (local_state & SYSTEM_STATE_BEACON)){
-      printf("It's beacon time %ld\r\n",local_state);
       uint8_t date_time_buf[32] = {0};
       rv3028c7_pack_datetime(&_obc_sensors.datetime,date_time_buf);
       uint8_t date_time_buf_len = 7;
@@ -1311,9 +1310,13 @@ void mainTask(void *argument)
       (void)memcpy(beacon_content_buf,(const void *)beacon_packet,(size_t)current_idx);
       beacon_content_len = current_idx;
       if (beacon_content_len > 0){
-        printf("Broadcast beacon len : %d\r\n",beacon_content_len);
+        uint8_t osi_buf[200];
+        uint8_t osi_buf_len = commu_encode(0x00,0x00,0x00,beacon_content_len,beacon_content_buf,osi_buf,200);
+        
         uint8_t beacon_kiss[200];
-        uint8_t beacon_kiss_len = KISS_Encode(beacon_content_buf,beacon_content_len,beacon_kiss);
+        uint8_t beacon_kiss_len = KISS_Encode_Custom_Cmd(osi_buf,0x01,osi_buf_len,beacon_kiss);
+        printf("Broadcast beacon len : %d final len %d\r\n",beacon_content_len,beacon_kiss_len);
+        
         HAL_UART_Transmit_IT(&COM_UART,beacon_kiss,beacon_kiss_len);
         beacon_content_len = 0;
       }

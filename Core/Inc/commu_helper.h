@@ -6,6 +6,20 @@
 #define COMMU_BUF_SIZE   256   // accumulation buffer, large enough for multi-chunk frames
 #define UART_MUTEX_TIMEOUT 1000
 #define BASIC_COMMU_FRAME_LEN 9
+
+typedef enum {
+  PID_OBC_GS_BEACON,
+  PID_OBC_GS_RESPONSE_PING,
+  PID_OBC_GS_RESPONSE_FILE_INFO,
+  PID_OBC_GS_RESPONSE_FILE_DATA,
+} obc_downlink_pid;
+
+typedef enum {
+  PID_GS_OBC_REQUEST_PING,
+  PID_GS_OBC_REQUEST_LIST_FILE,
+  PID_GS_OBC_REQUEST_FILE_INFO,
+} gs_uplink_pid;
+
 typedef enum{
       COMMU_RX_IDLE,
       COMMU_RX_ONGOING,
