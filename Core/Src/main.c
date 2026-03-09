@@ -1311,10 +1311,12 @@ void mainTask(void *argument)
       beacon_content_len = current_idx;
       if (beacon_content_len > 0){
         uint8_t osi_buf[200];
-        uint8_t osi_buf_len = commu_encode(0x00,0x00,0x00,beacon_content_len,beacon_content_buf,osi_buf,200);
+        uint8_t seq_num = 0;
+        uint8_t payload_id = 0;
+        uint8_t osi_buf_len = commu_encode(seq_num,payload_id,PID_OBC_GS_BEACON,beacon_content_len,beacon_content_buf,osi_buf,200);
         
         uint8_t beacon_kiss[200];
-        uint8_t beacon_kiss_len = KISS_Encode_Custom_Cmd(osi_buf,0x01,osi_buf_len,beacon_kiss);
+        uint8_t beacon_kiss_len = KISS_Encode_Custom_Cmd(osi_buf,KISS_CMD_DATA_FRAME,osi_buf_len,beacon_kiss);
         printf("Broadcast beacon len : %d final len %d\r\n",beacon_content_len,beacon_kiss_len);
         
         HAL_UART_Transmit_IT(&COM_UART,beacon_kiss,beacon_kiss_len);
