@@ -8,6 +8,7 @@ current_download_file = "unknown.bin"
 import time
 import threading
 import queue
+import sys
 from beacon_helper import *
 
 # Import your custom KISS protocol class
@@ -114,6 +115,7 @@ def parse_custom_payload(payload_bytes: bytes):
     return payload_id, pid, seq_num, data
 
 def main():
+    global beacon_count, last_beacon_rx_time, latest_beacon_data
     ser = serial.Serial(PORT, BAUD, timeout=0.1)
     print(f"Ground Station Started on {PORT}.")
     
@@ -136,6 +138,10 @@ def main():
     retry_count = 0
     MAX_RETRIES = 5
     ping_send_time = 0.0
+    
+    last_beacon_rx_time = 0.0
+    beacon_count = 0
+    latest_beacon_data = None
     
     print("\n[GS] Starting RX/TX Loops...")
     
@@ -220,14 +226,10 @@ def main():
                                 try:
                                     if p_id == 0x00:
                                         if pid == 0x00: # Ping
-                                            ret_beacon_dict = decode_beacon_packet(data)
-                                            print_decoded_beacon_data(ret_beacon_dict)
-
-                                        elif pid == 0x01: # Ping
                                             delay = (time.time() - ping_send_time) * 1000
                                             print(f"     Ping Response from OBC Received! time={delay:.1f}ms")
                                             
-                                        elif pid == 0x02: # List Files
+                                        elif pid == 0x01: # List Files
                                             num_files = data[0]
                                             print(f"     Found {num_files} files:")
                                             offset = 1
@@ -237,7 +239,7 @@ def main():
                                                 print(f"       - {name}")
                                                 offset += 1 + name_len
                                                 
-                                        elif pid == 0x03: # File Info
+                                        elif pid == 0x02: # File Info
                                             status, size, ts = struct.unpack('>BII', data)
                                             s_str = "OK" if status == 0 else "Error"
                                             print(f"     Status: {s_str} | Size: {size} bytes | Created: {ts}")
@@ -253,7 +255,7 @@ def main():
                                                     print(f"     \033[91m[GS] Target file not found. Auto-download aborted.\033[0m")
                                                     dl_active = False
                                             
-                                        elif pid == 0x04: # File Data
+                                        elif pid == 0x03: # File Data
                                             status, offset, dl = struct.unpack('>BIH', data[:7])
                                             chunk = data[7:7+dl]
                                             print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
@@ -307,6 +309,18 @@ def main():
                                                 if dl_active:
                                                     print(f"     \033[93m[GS] End of file reached or error occurred.\033[0m")
                                                     dl_active = False
+                                        
+                                        elif pid == 0x04: # EPS Beacon
+                                            ret_beacon_dict = decode_beacon_packet(data)
+                                            if ret_beacon_dict:
+                                                beacon_count += 1
+                                                last_beacon_rx_time = time.time()
+                                                latest_beacon_data = ret_beacon_dict
+                                                
+                                                print("") # Force a newline over the GS> prompt
+                                                print_decoded_beacon_data(ret_beacon_dict)
+                                                print("GS> ", end="", flush=True) # Reprint prompt after jumping
+                                            
                                             
                                     elif p_id == 0x01:
                                         if pid == 0x00: # Ping
