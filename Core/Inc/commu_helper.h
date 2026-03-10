@@ -31,6 +31,7 @@ typedef enum {
   PID_GS_OBC_REQUEST_PING,
   PID_GS_OBC_REQUEST_LIST_FILE,
   PID_GS_OBC_REQUEST_FILE_INFO,
+  PID_GS_OBC_REQUEST_FILE_DATA,
 } gs_uplink_pid;
 
 typedef enum{
