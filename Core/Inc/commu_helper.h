@@ -46,14 +46,22 @@ typedef enum {
     COMMU_ERR_PORT   = -2,
     COMMU_ERR_TYPE   = -3,
     COMMU_ERR_FRAMING = -4,
-    COMMU_ERR_CRC    = -5  // Added for CRC validation
+    COMMU_ERR_CRC    = -5,  // Added for CRC validation
+    COMMU_ERR_DATA = -6,
 } commu_status_t;
 
 typedef struct {
     uint8_t seq_num; 
     uint8_t payload_id; 
     uint8_t pid; 
+    uint16_t data_len;
 } commu_header_t;
+
+typedef struct{
+  char file_name[256];
+  uint32_t file_offset;
+  uint16_t chunk_len;
+} commu_file_data;
 
 static uint8_t commu_temp_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
 static uint8_t commu_data_buff[COMMU_BUF_SIZE];  // accumulation buffer
@@ -108,7 +116,7 @@ uint16_t commu_encode(uint8_t seq_num, uint8_t payload_id, uint8_t pid,
     return index;
 }
 
-commu_status_t commu_decode_get_header(uint8_t *input_buf, uint16_t input_len,commu_header_t *header){
+commu_status_t commu_decode(const uint8_t *input_buf, uint16_t input_len,commu_header_t *header,uint8_t *output_payload){
     /* seq (1) + payload_id (1) + pid (1) + dataLen (2) + crc (4)*/
     if (input_len < BASIC_COMMU_FRAME_LEN){
       return COMMU_ERR_FRAMING;
@@ -125,7 +133,40 @@ commu_status_t commu_decode_get_header(uint8_t *input_buf, uint16_t input_len,co
     header->seq_num = input_buf[0];
     header->payload_id = input_buf[1];
     header->pid = input_buf[2];
+    header->data_len = (input_buf[3] << 8) | (input_buf[4]);
+    if (output_payload != NULL && header->data_len >= 0){
+      /* -4 for crc -5 for headers*/
+      memcpy(output_payload,&input_buf[5],header->data_len);
+    }
     return COMMU_VALID_DATA;
+}
+
+commu_status_t decode_file_data_request(const uint8_t *input_data,uint8_t input_len,commu_file_data *file_data){
+  uint8_t filename_len = input_data[0];
+  if (filename_len <= 0){
+    return COMMU_ERR_DATA;
+  }
+  /* 6 = file_offset (4) + chunk_len(2) */
+  if (input_len <= 6 + filename_len){
+    return COMMU_ERR_DATA;
+  }
+
+  strncpy(file_data->file_name,&input_data[1],filename_len);
+  if (filename_len < 255){
+    file_data->file_name[filename_len] = '\0'; /* NULL String at the end of file name */
+  }
+  else{
+    file_data->file_name[255] = '\0'; /* NULL String at the end of file name */
+  }
+  uint8_t *leftover = &input_data[filename_len + 1]; /* filename_len + the file name string offset */
+
+  file_data->file_offset =  (leftover[0] << 24) |
+                            (leftover[1] << 16) |
+                            (leftover[2] << 8) |
+                            (leftover[3]);
+  file_data->chunk_len =  (leftover[4] << 8) |
+                          (leftover[5]);
+  return COMMU_VALID_DATA;
 }
 
 void commu_init(){

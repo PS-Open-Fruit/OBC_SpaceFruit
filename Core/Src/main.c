@@ -1346,7 +1346,8 @@ void mainTask(void *argument)
           printf("Invalid KISS Frame from COMMU\r\n");
         }
         commu_header_t commu_request_header;
-        commu_status_t status_commu =  commu_decode_get_header(dekissed_buff,dekissed_len,&commu_request_header);
+        uint8_t commu_payload[128] = {0};
+        commu_status_t status_commu =  commu_decode(dekissed_buff,dekissed_len,&commu_request_header,commu_payload);
         // kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
         
 
@@ -1402,9 +1403,21 @@ void mainTask(void *argument)
                 break;
               case PID_GS_OBC_REQUEST_FILE_DATA:
                 printf("GS Request File data\r\n");
+                uint32_t currentPayloadFlag = osEventFlagsGet(payloadFlagHandle);
+                if (currentPayloadFlag & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
+                  printf("\033[0;31mNot now, payload file copying\033[0m\r\n");
+                  break;
+                }
+                commu_file_data requested_file;
+                commu_status_t decode_status = decode_file_data_request(commu_payload,commu_request_header.data_len,&requested_file);
+                if (decode_status != COMMU_VALID_DATA){
+                  printf("Decoded return %d\r\n",decode_status);
+                  break;
+                }
+                printf("file_name : %s chunk_len : %d, file_offset %ld\r\n",requested_file.file_name,requested_file.chunk_len,requested_file.file_offset);
                 break;
               default:
-                printf("Knknown OBC PID\r\n");
+                printf("Unknown OBC PID\r\n");
                 break;
             }
           }
@@ -1481,6 +1494,8 @@ void usbTask(void *argument)
         if (status == osErrorTimeout){
           if (payload_commu_state == PAYLOAD_STATE_RX){
             printf("USB RX Timeout, Reset State...\r\n");
+            osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER);
+            osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
             payload_commu_state = PAYLOAD_STATE_IDLE;
             current_offset = 0;
           }
