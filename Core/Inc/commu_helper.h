@@ -169,6 +169,27 @@ commu_status_t decode_file_data_request(const uint8_t *input_data,uint8_t input_
   return COMMU_VALID_DATA;
 }
 
+uint16_t commu_list_file_encode(char files[20][256],uint8_t files_count,uint8_t *output_buffer){
+  uint16_t output_len = 0;
+  printf("file count %d\r\n",files_count);
+  if (files_count <= 0){
+    return 0;
+  }
+  if (output_buffer == NULL){
+    return 0;
+  }
+  output_buffer[output_len] = files_count;
+  output_len++;
+  for (int i = 0;i<files_count;i++){
+    uint16_t file_len = strlen(files[i]);
+    output_buffer[output_len] = file_len;
+    output_len++;
+    strncpy(&output_buffer[output_len],files[i],file_len);
+    output_len += file_len;
+  }
+  return output_len;
+}
+
 void commu_init(){
   commuSemaphoreHandle = osSemaphoreNew(1,0,&commuSemaphoreAttr);
   uartMutexHandle = osMutexNew(&uartMutex_attributes);

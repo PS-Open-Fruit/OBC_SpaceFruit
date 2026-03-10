@@ -92,7 +92,7 @@ DMA_HandleTypeDef hdma_uart5_tx;
 osThreadId_t MainTaskHandle;
 const osThreadAttr_t MainTask_attributes = {
   .name = "MainTask",
-  .stack_size = 1024 * 4,
+  .stack_size = 4096 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for USBTask */
@@ -1397,6 +1397,62 @@ void mainTask(void *argument)
                 break;
               case PID_GS_OBC_REQUEST_LIST_FILE:
                 printf("GS Request List File\r\n");
+                uint32_t currentPayloadFlag1 = osEventFlagsGet(payloadFlagHandle);
+                if (currentPayloadFlag1 & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
+                  printf("\033[0;31mNot now, payload file copying\033[0m\r\n");
+                  break;
+                }
+                FATFS FatFs;
+                FRESULT res;
+                DIR dir;
+                FILINFO fno;
+                printf("\r\n");
+
+                res = f_mount(&FatFs,"",1);
+                if (res != FR_OK){
+                  printf("Mount error\r\n");
+                  break;
+                }
+                char files_name[20][256];
+                uint8_t file_count = 0;
+                // Open the root directory
+                res = f_opendir(&dir, "/");
+                if (res == FR_OK) {
+                    for (;;) {
+                        // Read a directory item
+                        res = f_readdir(&dir, &fno);
+                        if (res != FR_OK || fno.fname[0] == 0) break; // End of directory
+
+                        // Check if it is a directory or file
+                        if (fno.fattrib & AM_DIR) {
+                            printf("Dir: %s\r\n", fno.fname);
+                        } else {
+                            printf("File: %s (Size: %u)\r\n", fno.fname, fno.fsize);
+                            strcpy(files_name[file_count],fno.fname);
+                            file_count++;
+                        }
+                    }
+                    f_closedir(&dir);
+                }
+                res = f_mount(NULL,"",0);
+                printf("\r\n");
+                uint8_t list_file_buf[256] = {0};
+                uint16_t list_file_encoded_len = commu_list_file_encode(files_name,file_count,list_file_buf);
+
+                if (list_file_encoded_len == 0){
+                  printf("Encode list file error\r\n");
+                  break;
+                }
+
+                uint8_t commu_list_file_encoded[256] = {0};
+                uint16_t commu_list_file_encoded_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_OBC_GS_RESPONSE_LIST_FILE,list_file_encoded_len,list_file_buf,commu_list_file_encoded,512); 
+
+                uint8_t kiss_list_file_encoded[256] = {0};
+                uint16_t kiss_list_file_encoded_len = KISS_Encode_Custom_Cmd(commu_list_file_encoded,KISS_CMD_DATA_FRAME,commu_list_file_encoded_len,kiss_list_file_encoded);
+
+                ret = HAL_UART_Transmit_IT(&COM_UART,kiss_list_file_encoded,kiss_list_file_encoded_len);
+                printf("Responsded ping from commu with return %d from UART\r\n",ret);
+
                 break;
               case PID_GS_OBC_REQUEST_FILE_INFO:
                 printf("GS Request File info\r\n");
