@@ -129,15 +129,23 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | 1B | 1B | N |
 
 **Request Copy Image to SD `(PID: 0x03)`**
-*   **Request (Dynamic Length):**
-    | Filename Length | Filename ASCII |
-    | :--- | :--- |
-    | 1B | N |
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
 *   **Response (1 byte):**
     | Status (0x00 = OK, 0x01 = Error) |
     | :--- |
     | 1B |
 
+#### 3. Core Sensors / EPS (PayloadID: `0x00`)
+
+**Unsolicited EPS Beacon `(PID: 0x04)`**
+*   **Request:** None (Broadcast periodically from OBC)
+*   **Beacon Data (121 bytes Fixed C-Struct):**
+    | RTC DateTime | 8x VI Sensors | 6x Out Sensors | 6x Out States | 2x Battery Temps | 1x TMP1075 Raw |
+    | :--- | :--- | :--- | :--- | :--- | :--- |
+    | 7B (date_time_t) | 48B (8 * 6B) | 36B (6 * 6B) | 18B (6 * 3B) | 8B (2 * 4B) | 4B (i32) |
 
 ## How to run the Emulator
 
@@ -159,6 +167,7 @@ Commands:
   download <filename>   - Download file from OBC
   status                - Request Pi Status
   capture               - Request Image Capture
+  copy                  - Request Copy Image to SD
   exit                  - Exit Ground Station
 GS> 
 ```

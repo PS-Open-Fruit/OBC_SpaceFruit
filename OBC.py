@@ -4,6 +4,8 @@ import os
 
 SD_CARD_DIR = "sd_card"
 os.makedirs(SD_CARD_DIR, exist_ok=True)
+PI_FILES_DIR = "pi_files"
+os.makedirs(PI_FILES_DIR, exist_ok=True)
 import time
 import random
 
@@ -258,12 +260,35 @@ def main():
                                         filename = b"image_02.jpg"
                                         dummy_data = struct.pack('>BB', 0x00, len(filename)) + filename
                                         
+                                    elif pid == 0x03: # Copy Image to SD
+                                        filename = b"all_files"
+                                        try:
+                                            import shutil
+                                            # Copy all files from PI_FILES_DIR to SD_CARD_DIR
+                                            files_copied = 0
+                                            for f in os.listdir(PI_FILES_DIR):
+                                                src = os.path.join(PI_FILES_DIR, f)
+                                                if os.path.isfile(src):
+                                                    dst = os.path.join(SD_CARD_DIR, f)
+                                                    shutil.copy2(src, dst)
+                                                    files_copied += 1
+                                            
+                                            print(f"  -> Emulated Copy: Copied {files_copied} files from '{PI_FILES_DIR}' to '{SD_CARD_DIR}'")
+                                            # Status 0x00 = OK
+                                            dummy_data = struct.pack('>B', 0x00)
+                                        except Exception as e:
+                                            print(f"  -> Emulated Copy Error: {e}")
+                                            # Status 0x01 = Error
+                                            dummy_data = struct.pack('>B', 0x01)
+                                            
+                                        
                                 # Send response (Command 0x01) echoing the p_id and pid
-                                custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)
-                                tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
-                                
-                                print(f"  -> TX Raw Frame: {colorize_raw_frame(tx_frame)}")
-                                ser.write(tx_frame)
+                                if 'RX_handled' not in locals() or not locals().get('RX_handled'):
+                                    custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)
+                                    tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
+                                    
+                                    print(f"  -> TX Raw Frame: {colorize_raw_frame(tx_frame)}")
+                                    ser.write(tx_frame)
                                     
                             # Handle GS ACK (Command 0xAC)
                             elif cmd == 0xAC:
