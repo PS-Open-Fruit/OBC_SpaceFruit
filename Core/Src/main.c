@@ -1187,7 +1187,7 @@ void mainTask(void *argument)
 
   uint8_t local_eps_state = EPS_DATA_NO_DATA;
   // osDelay(2000);
-  // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
   /* Infinite loop */
 
   uint8_t eps_beacon_buf[EPS_PACKED_BUFFER_SIZE] = {0};
@@ -1357,7 +1357,6 @@ void mainTask(void *argument)
             switch (commu_request_header.pid)
             {
             case PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD:
-              osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
               printf("Download image command\r\n");
               uint8_t ack_msg[32] = {0x00,0xAC};
               uint16_t ack_len = 0;
@@ -1365,9 +1364,11 @@ void mainTask(void *argument)
               ack_len = KISS_Encode(ack_msg,2,msg);
               printf("ACK to COMMU\r\n");
               HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
+              osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
               break;
             case PID_GS_VR_REQUEST_CAPTURE:
               printf("GS Requests to Capture\r\n");
+              osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_POLL_CAPTURE);
               break;
             case PID_GS_VR_REQUEST_PI_STATUS:
               printf("GS Requests PI Status\r\n");
@@ -1412,18 +1413,27 @@ void mainTask(void *argument)
       osMutexRelease(uartMutexHandle);
     }
 
-    if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
-      osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
-      uint8_t cmd_encoded[32] = {0};
-      uint8_t request_content[3] = {0x00,0xFF,0xFF};
-      uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content,3,KISS_CMD_DATA, cmd_encoded);
-      CDC_Transmit_FS(cmd_encoded,req_len);
-      printf("KISS Frame Encoded : ");
-      for (int i = 0; i < req_len;i++){
-        printf("0x%02X ",cmd_encoded[i]);
+    uint32_t payloadFlag = osEventFlagsGet(payloadFlagHandle);
+    if (payloadFlag & PAYLOAD_FLAG_IDLE){
+      if (payloadFlag & PAYLOAD_FLAG_IMAGE_REQUEST){
+        osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+        uint8_t cmd_encoded[32] = {0};
+        uint8_t request_content[3] = {0x00,0xFF,0xFF};
+        uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content,3,KISS_CMD_DATA, cmd_encoded);
+        CDC_Transmit_FS(cmd_encoded,req_len);
+        printf("KISS Frame Encoded : ");
+        for (int i = 0; i < req_len;i++){
+          printf("0x%02X ",cmd_encoded[i]);
+        }
+        printf("\r\n");
       }
-      printf("\r\n");
-      osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
+      else if (payloadFlag & PAYLOAD_FLAG_POLL_CAPTURE){
+        osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+        uint8_t cmd_encoded[32] = {0};
+        // uint8_t request_content[3] = {0x00,0xFF,0xFF};
+        uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,NULL,0,KISS_CMD_DATA, cmd_encoded);
+        CDC_Transmit_FS(cmd_encoded,req_len);
+      }
     }
 
   }
@@ -1513,7 +1523,6 @@ void usbTask(void *argument)
         }
 
         /* --- Process valid frame --- */
-        osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
 
         if (decoded_payload.payload_id == KISS_PAYLOAD_ID_VR)
         {
@@ -1550,11 +1559,16 @@ void usbTask(void *argument)
                 if (flag & PAYLOAD_FLAG_POLL_CAPTURE)
                 {
                     printf("Payload acks Capture\r\n");
+                    osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_POLL_CAPTURE);
                     osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+                    payload_commu_state = PAYLOAD_STATE_IDLE;
                 }
                 if (flag & PAYLOAD_FLAG_IMAGE_REQUEST)
                 {
                     printf("Payload acks Image Request\r\n");
+                    osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IMAGE_REQUEST);
+                    osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IMAGE_TRANSFER);
+
                     current_chunk = 0;
                     /* Set your image transfer state flag here */
                         //Open the file system
@@ -1569,11 +1583,15 @@ void usbTask(void *argument)
                       continue;
                     }
                     f_close(&fil);
+                    printf("\033[0;32mOBC Starts Copy image from Payload\033[0m\r\n");
+                    // osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IMAGE_REQUEST);
                 }
             }
             else if (decoded_payload.pid == KISS_VR_PID_IMAGE_DOWNLOAD_DONE){
-              printf("Transfer Image Done\r\n");
+              printf("\033[0;32mTransfer Image Done\033[0m\r\n");
               payload_commu_state = PAYLOAD_STATE_IDLE;
+              osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER);
+              osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
               fres = f_mount(NULL, "", 0);
               if (fres != FR_OK) {
                 printf("unmount error (%i)\r\n", fres);
