@@ -141,6 +141,28 @@ commu_status_t commu_decode(const uint8_t *input_buf, uint16_t input_len,commu_h
     return COMMU_VALID_DATA;
 }
 
+commu_status_t decode_file_info_request(const uint8_t *input_data,uint8_t input_len,commu_file_data *file_data){
+  uint8_t filename_len = input_data[0];
+  if (filename_len <= 0){
+    return COMMU_ERR_DATA;
+  }
+  /* 6 = file_offset (4) + chunk_len(2) */
+  if (input_len <=  filename_len){
+    return COMMU_ERR_DATA;
+  }
+
+  strncpy(file_data->file_name,&input_data[1],filename_len);
+  if (filename_len < 255){
+    file_data->file_name[filename_len] = '\0'; /* NULL String at the end of file name */
+  }
+  else{
+    file_data->file_name[255] = '\0'; /* NULL String at the end of file name */
+  }
+  file_data->file_offset = 0;
+  file_data->chunk_len = 0;
+  return COMMU_VALID_DATA;
+}
+
 commu_status_t decode_file_data_request(const uint8_t *input_data,uint8_t input_len,commu_file_data *file_data){
   uint8_t filename_len = input_data[0];
   if (filename_len <= 0){
@@ -187,6 +209,29 @@ uint16_t commu_list_file_encode(char files[20][256],uint8_t files_count,uint8_t 
     strncpy(&output_buffer[output_len],files[i],file_len);
     output_len += file_len;
   }
+  return output_len;
+}
+
+uint16_t commu_file_info_encode(uint8_t status, uint32_t file_size, uint32_t created_time,uint8_t *output_buffer){
+  uint16_t output_len = 0;
+  output_buffer[output_len] = status;
+  output_len++;
+  output_buffer[output_len] = (file_size >> 24) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_size >> 16) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_size >> 8) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_size >> 0) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (created_time >> 24) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (created_time >> 16) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (created_time >> 8) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (created_time >> 0) & 0xFF;
+  output_len++;
   return output_len;
 }
 

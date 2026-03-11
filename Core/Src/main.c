@@ -36,6 +36,7 @@
 #include "kiss_protocol.h"
 #include "protocol_utils.h"
 #include "commu_helper.h"
+#include "time.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -1516,6 +1517,76 @@ void mainTask(void *argument)
                 break;
               case PID_GS_OBC_REQUEST_FILE_INFO:
                 printf("GS Request File info\r\n");
+                uint32_t currentPayloadFlagForInfo = osEventFlagsGet(payloadFlagHandle);
+                if (currentPayloadFlagForInfo & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
+                  printf("\033[0;31mNot now, payload file copying\033[0m\r\n");
+                  break;
+                }
+                commu_file_data requested_file_for_info;
+                commu_status_t decode_status_for_info = decode_file_info_request(commu_payload,commu_request_header.data_len,&requested_file_for_info);
+                if (decode_status_for_info != COMMU_VALID_DATA){
+                  printf("Decoded return %d\r\n",decode_status_for_info);
+                  break;
+                }
+                printf("\r\n");
+                FATFS FatFs_info;
+                FRESULT res_info;
+                FIL file_info;
+                FILINFO fno_info;
+                FSIZE_t file_size_info;
+                res_info = f_mount(&FatFs_info,"",1);
+                if (res_info != FR_OK){
+                  printf("Mount error\r\n");
+                  break;
+                }
+                res_info = f_open(&file_info, requested_file_for_info.file_name, FA_READ);
+                if (res_info == FR_OK) {
+                    file_size_info = f_size(&file_info);
+                    f_close(&file_info);
+                }
+                else{
+                  printf("open to get info error %d\r\n",res_info);
+                }
+                res_info = f_stat(requested_file_for_info.file_name, &fno);
+                uint32_t epoch_info = 0;
+                if (res_info == FR_OK) {
+                    // 2. Map FatFs bitfields to a standard tm struct
+                    struct tm t;
+                    
+                    // FatFs Date: bit15:9=Year(0-127), bit8:5=Month(1-12), bit4:0=Day(1-31)
+                    // FatFs Year 0 starts at 1980
+                    t.tm_year = ((fno.fdate >> 9) & 0x7F) + 80; 
+                    t.tm_mon  = ((fno.fdate >> 5) & 0x0F) - 1; 
+                    t.tm_mday = (fno.fdate & 0x1F);
+
+                    // FatFs Time: bit15:11=Hour(0-23), bit10:5=Minute(0-59), bit4:0=Second/2(0-29)
+                    t.tm_hour = (fno.ftime >> 11) & 0x1F;
+                    t.tm_min  = (fno.ftime >> 5) & 0x3F;
+                    t.tm_sec  = (fno.ftime & 0x1F) * 2;
+                    
+                    t.tm_isdst = -1; // Not considering Daylight Savings
+
+                    // 3. Convert to Unix Epoch
+                    time_t epoch = mktime(&t);
+                    epoch_info = (uint32_t)epoch;
+                }
+                f_mount(NULL,"",0);
+                printf("request %s size, which is = %ld, epoch = %ld\r\n",requested_file_for_info.file_name,file_size_info,epoch_info);
+                uint8_t buf_a_info[64];
+                uint8_t buf_b_info[64];
+                uint8_t buf_len_info = 0;
+
+                buf_len_info = commu_file_info_encode(0,file_size_info,epoch_info,buf_a_info);
+                buf_len_info = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_OBC_GS_RESPONSE_FILE_INFO,buf_len_info,buf_a_info,buf_b_info,64);
+                if (buf_len_info == 0){
+                  printf("commu encode error file info\r\n");
+                }
+                buf_len_info = KISS_Encode_Custom_Cmd(buf_b_info,KISS_CMD_DATA_FRAME,buf_len_info,buf_a_info);
+                if (buf_len_info == 0){
+                  printf("kiss encode error file info\r\n");
+                }
+                ret = HAL_UART_Transmit(&COM_UART,buf_a_info,buf_len_info,1000);
+                printf("Responsded ping from commu with return %d from UART\r\n",ret);
                 break;
               case PID_GS_OBC_REQUEST_FILE_DATA:
                 printf("GS Request File data\r\n");
