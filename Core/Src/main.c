@@ -1340,10 +1340,18 @@ void mainTask(void *argument)
         printf("downlink kiss encode error\r\n");
       }
       HAL_UART_Transmit(&COM_UART,buf_b,buf_len,1000);
+      
+      downlink_file_data.file_offset += actual_read_len;
       // printf("downlink %d file_name : %s chunk_len : %d, file_offset %ld\r\n",local_state,downlink_file_data.file_name,downlink_file_data.chunk_len,downlink_file_data.file_offset);
+      
       downlink_seq_num++;
       last_commu_timeNow = millis;
-      if (downlink_seq_num % DOWNLINK_WINDOW_SIZE == 0){
+      if (actual_read_len < downlink_file_data.chunk_len){
+          printf("End of file reached. Downlink complete.\r\n");
+          osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
+          osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+      }
+      else if (downlink_seq_num % DOWNLINK_WINDOW_SIZE == 0){
         osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
         osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_WAIT_ACK);
       }
@@ -1403,11 +1411,17 @@ void mainTask(void *argument)
         uint16_t buff_size = commu_size;
         uint8_t dekissed_buff[256];
         kiss_status_t dekissed_len = KISS_Decode(temp_commu_data_buff,buff_size,dekissed_buff);
-        if (dekissed_len == 0){
-          printf("Invalid KISS Frame from COMMU\r\n");
-        }
         commu_header_t commu_request_header;
         uint8_t commu_payload[128] = {0};
+        
+        // Check for 0xAC (GS ACK) before COMMU decode
+        if (temp_commu_data_buff[1] == 0xAC) {
+            printf("[OBC] Received ACK from GS\r\n");
+            osEventFlagsClear(systemStateFlagHandle, SYSTEM_STATE_WAIT_ACK);
+            osEventFlagsSet(systemStateFlagHandle, SYSTEM_STATE_DOWNLINK);
+            continue; // Skip COMMU decode for ACK
+        }
+        
         commu_status_t status_commu =  commu_decode(dekissed_buff,dekissed_len,&commu_request_header,commu_payload);
         // kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
         
