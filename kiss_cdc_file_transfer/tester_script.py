@@ -2,8 +2,55 @@ import serial
 import time
 import sys
 import os
+import csv
+from datetime import datetime
 from kiss_protocol import KISSProtocol as KISS
-from config import CHUNK_SIZE
+# from config import CHUNK_SIZE
+
+# ─────────────────────────────────────────────────────────────
+#  Transfer metrics log
+# ─────────────────────────────────────────────────────────────
+TRIGGER_FRAME: bytes = bytes([
+    0xC0, 0x00, 0x01, 0x02, 0x00, 0x03, 0x00, 0xFF, 0xFF,
+    0x67, 0x3C, 0x6D, 0xB4, 0xC0,
+])
+
+
+METRICS_CSV = "test_log_automated.csv"
+METRICS_FIELDNAMES = [
+    "timestamp",
+    "chunk_size",
+    "total_bytes",
+    "elapsed_s",
+    "rate_kbps",
+    "rate_KBps",
+    "total_chunks",
+    "file",
+]
+
+def append_metrics(total_bytes: int, elapsed: float, chunk_size: int, total_chunks: int):
+    """Append one row of transfer metrics to transfer_metrics.csv."""
+    if elapsed <= 0:
+        elapsed = 0.001
+    row = {
+        "timestamp":    datetime.now().isoformat(timespec="seconds"),
+        "chunk_size":   chunk_size,
+        "total_bytes":  total_bytes,
+        "elapsed_s":    round(elapsed, 4),
+        "rate_kbps":    round((total_bytes * 8) / elapsed / 1_000, 2),
+        "rate_KBps":    round(total_bytes / elapsed / 1_024, 3),
+        "total_chunks": total_chunks,
+        "file":         FILE_TO_SAVE,
+    }
+    file_exists = os.path.isfile(METRICS_CSV)
+    with open(METRICS_CSV, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=METRICS_FIELDNAMES)
+        if not file_exists:
+            writer.writeheader()        # write header only once
+        writer.writerow(row)
+    Log.ok(f"Metrics saved → {C.BOLD}{METRICS_CSV}{C.RESET}  "
+           f"(chunk_size={chunk_size}, {row['rate_kbps']} kbps)")
+
 
 # ─────────────────────────────────────────────────────────────
 #  ANSI color / style helpers
@@ -62,16 +109,13 @@ class Log:
 
         bar = cls.active_bar
         if bar and bar._pinned:
-            # Move to saved position (bar line), scroll it down by inserting a line above,
-            # print the log message there, then redraw the bar on the next line.
             sys.stdout.write(
-                bar._RESTORE        # jump to bar's home position
-                + "\033[1L"         # insert 1 blank line (pushes bar down)
-                + "\033[2K"         # clear the line we're now on
-                + formatted + "\n"  # print log line
+                bar._RESTORE
+                + "\033[1L"
+                + "\033[2K"
+                + formatted + "\n"
             )
             sys.stdout.flush()
-            # Re-save cursor at the bar's new home (one line lower) and redraw
             sys.stdout.write(bar._SAVE)
             bar._render()
         else:
@@ -101,12 +145,11 @@ class Log:
 class ProgressBar:
     BAR_WIDTH = 38
 
-    # ANSI escape sequences for cursor control
-    _SAVE    = "\033[s"          # save cursor position
-    _RESTORE = "\033[u"          # restore cursor to saved position
-    _CLEAR   = "\033[2K"         # erase the entire current line
-    _HIDE    = "\033[?25l"       # hide cursor while animating
-    _SHOW    = "\033[?25h"       # show cursor again
+    _SAVE    = "\033[s"
+    _RESTORE = "\033[u"
+    _CLEAR   = "\033[2K"
+    _HIDE    = "\033[?25l"
+    _SHOW    = "\033[?25h"
 
     def __init__(self, total_bytes: int, chunk_size: int):
         self.total      = total_bytes
@@ -115,13 +158,12 @@ class ProgressBar:
         self.current    = 0
         self.chunk_num  = 0
         self.start      = time.monotonic()
-        self._pinned    = False   # have we printed the bar's home line yet?
+        self._pinned    = False
 
     def _pin(self):
-        """Print the bar for the first time and save the cursor position."""
         sys.stdout.write(self._HIDE)
-        sys.stdout.write("\n")          # blank line so the bar has breathing room
-        sys.stdout.write(self._SAVE)    # remember exactly where we are
+        sys.stdout.write("\n")
+        sys.stdout.write(self._SAVE)
         self._pinned = True
         self._render()
 
@@ -147,7 +189,7 @@ class ProgressBar:
         sent_kb  = self.current / 1_024
         total_kb = self.total   / 1_024
 
-        chunk_info = (f"{C.DIM}chunk {self.chunk_num}/{self.total_chunks}{C.RESET}")
+        chunk_info = (f"{C.DIM}chunk {self.chunk_num+1}/{self.total_chunks}{C.RESET}")
 
         line = (
             f"  {C.MAGENTA}{C.BOLD}XFER{C.RESET} "
@@ -159,13 +201,11 @@ class ProgressBar:
             f"{chunk_info}"
         )
 
-        # Jump back to the saved position, wipe the line, redraw
         sys.stdout.write(self._RESTORE + self._CLEAR + line)
         sys.stdout.flush()
 
     def finish(self):
         self.update(self.total, self.chunk_num)
-        # Move past the bar line, restore cursor visibility
         sys.stdout.write("\n" + self._SHOW)
         sys.stdout.flush()
 
@@ -206,8 +246,22 @@ try:
 except FileNotFoundError:
     SERIAL_PORT = '/dev/ttys005'
 
-BAUD_RATE    = 115200
-FILE_TO_SAVE = 'testimg-1.jpg'
+BAUD_RATE  = 115200
+NUM_TEST = 3
+CHUNK_SIZES = [
+    # 32,
+    64,
+    128,256,512,1024,2048,4096,
+    8192,
+    16384,32768
+]
+IMAGES = [
+    "testimg-1.jpg",
+    "testimg-2.jpg",
+    "testimg-3.jpg"
+]
+FILE_TO_SAVE = IMAGES[0]
+CHUNK_SIZE = CHUNK_SIZES[0]
 
 ser: serial.Serial | None = None
 
@@ -225,7 +279,8 @@ def _banner():
     print(C.BOLD + C.CYAN + "  ║     VR Image Transfer Tool  v1.0     ║" + C.RESET)
     print(C.BOLD + C.CYAN + "  ╚══════════════════════════════════════╝" + C.RESET)
     print()
-    Log.info(f"Port: {C.BOLD}{SERIAL_PORT}{C.RESET}  Baud: {C.BOLD}{BAUD_RATE}{C.RESET}  File: {C.BOLD}{FILE_TO_SAVE}{C.RESET}")
+    Log.info(f"Port: {C.BOLD}{SERIAL_PORT}{C.RESET}  Baud: {C.BOLD}{BAUD_RATE}{C.RESET}  "
+             f"File: {C.BOLD}{FILE_TO_SAVE}{C.RESET}  chunk_size: {C.BOLD}{CHUNK_SIZE}{C.RESET}")
     print()
 
 
@@ -305,7 +360,7 @@ def getCaptureRequest():
     file_mode        = FILE_MODE_IDLE
     current_chunk_id = 0
     current_file_id  = 0
-    total_file_size  = 0        # filled when we first open the file
+    total_file_size  = 0
 
     while True:
 
@@ -320,7 +375,6 @@ def getCaptureRequest():
             transfer_content = data[chunk_start:chunk_end]
 
             if chunk_start <= total_file_size:
-                # Initialise timer + progress bar on first chunk
                 if current_chunk_id == 0:
                     transfer_start_time = time.monotonic()
                     transfer_bytes_sent = 0
@@ -353,9 +407,14 @@ def getCaptureRequest():
                 elapsed = time.monotonic() - transfer_start_time
                 print_transfer_summary(transfer_bytes_sent, elapsed)
 
+                # ── Save metrics for later plotting ───────────
+                total_chunks_sent = -(-total_file_size // CHUNK_SIZE)  # ceiling div
+                append_metrics(transfer_bytes_sent, elapsed, CHUNK_SIZE, total_chunks_sent)
+
                 file_mode        = FILE_MODE_IDLE
                 current_chunk_id = 0
                 current_file_id  = 0
+                break
 
         # ── Receive & dispatch ─────────────────────────────────
         buf   = recv_whole_frame()
@@ -428,10 +487,29 @@ def getCaptureRequest():
 #  Entry point
 # ─────────────────────────────────────────────────────────────
 def run():
-    print("\033c",end="")
-    _banner()
-    connect_serial()
-    getCaptureRequest()
+    global FILE_TO_SAVE
+    global CHUNK_SIZE
+    for i in range(len(IMAGES)):
+        FILE_TO_SAVE = IMAGES[i]
+        for chunk_index in range(len(CHUNK_SIZES)):
+            CHUNK_SIZE = CHUNK_SIZES[chunk_index]
+            for test_num in range(NUM_TEST):
+                print("\033c",end="")
+                _banner()
+                connect_serial()
+                time.sleep(2)
+                reqSer = serial.Serial("/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10OMHTZ-if00-port0",9600)
+                reqSer.write(TRIGGER_FRAME)
+                print("Sent requests")
+                # reqSer.write(TRIGGER_FRAME)
+                # print("Sent requests")
+                # time.sleep(1)
+                # time.sleep(1)
+                reqSer.close()
+                print("close serial")
+                getCaptureRequest()
+                print("Program ends")
+                time.sleep(1)
 
 
 if __name__ == "__main__":
