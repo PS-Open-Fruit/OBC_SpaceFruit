@@ -1355,7 +1355,7 @@ void mainTask(void *argument)
       else if (downlink_seq_num % DOWNLINK_WINDOW_SIZE == 0){
         osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_ALL);
         osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
-        last_commu_timeNow = millis;
+        beacon_timeNow = millis;
       }
       printf("after update sequence %d flag %ld\r\n",downlink_seq_num,osEventFlagsGet(systemStateFlagHandle));
     }
