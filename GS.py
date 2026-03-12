@@ -23,7 +23,6 @@ print(f"[GS] Platform: {sys.platform} -> Using port: {PORT}")
 BAUD = 9600
 
 
-
 def colorize_raw_frame(frame: bytes) -> str:
     """Colors the raw KISS frame hex string for easier reading."""
     if len(frame) < 12: return frame.hex(' ').upper()
@@ -166,11 +165,11 @@ def main():
                 dl_offset = 0
                 dl_active = True
                 dl_total_size = 0
+                dl_start_time = 0.0
                 retry_count = 0
                 last_request_time = time.time()
-                
-                print(f"\n[GS] --- Starting Automated Download for '{fname}' ---")
-                # Request File Info first to determine file size
+                print(f"\n[GS] --- Starting Download for '{fname}' ---")
+                # Always request File Info first to get total size (and then decide offset)
                 req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes
                 command_queue.put(('PRE_DOWNLOAD_INFO', 0x00, 0x02, "Auto-Request File Info", req_data))
                 continue
@@ -254,7 +253,19 @@ def main():
                                                 if status == 0x00:
                                                     dl_total_size = size
                                                     dl_start_time = time.time()
-                                                    print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
+                                                    # Check if we already have a partial file → resume from its size
+                                                    filepath = os.path.join(DOWNLOADS_DIR, current_download_file)
+                                                    if os.path.exists(filepath):
+                                                        partial = os.path.getsize(filepath)
+                                                        if 0 < partial < size:
+                                                            dl_offset = partial
+                                                            print(f"     [GS] Partial file found ({partial}/{size} B). Resuming...")
+                                                        else:
+                                                            dl_offset = 0
+                                                            print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
+                                                    else:
+                                                        dl_offset = 0
+                                                        print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
                                                     req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
                                                     command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request File Initial", req_data))
                                                 else:
