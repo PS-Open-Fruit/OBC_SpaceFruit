@@ -15,7 +15,7 @@ from beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
 
 # --- CONFIGURATION ---
-PORT = 'COM4'  # Change to your virtual or real COM port
+PORT = '/dev/cu.usbserial-A10OMHTZ'  # Change to your virtual or real COM port
 BAUD = 9600
 
 

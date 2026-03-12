@@ -1128,7 +1128,7 @@ void mainTask(void *argument)
 
 
   mt25q_init(&flash);
-  printf("Program Start\r\n");
+  printf("\033c\033[0;32mProgram Start\033[0m\r\n");
 
   if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
     printf("Reset by IWDG\r\n");
@@ -1348,14 +1348,15 @@ void mainTask(void *argument)
       downlink_seq_num++;
       last_commu_timeNow = millis;
       if (actual_read_len < downlink_file_data.chunk_len){
-          printf("End of file reached. Downlink complete.\r\n");
-          osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
-          osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+        printf("End of file reached. Downlink complete.\r\n");
+        osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
+        osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
       }
       else if (downlink_seq_num % DOWNLINK_WINDOW_SIZE == 0){
-        osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
+        osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_ALL);
         osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_WAIT_ACK);
       }
+      printf("after update sequence %d flag %ld\r\n",downlink_seq_num,osEventFlagsGet(systemStateFlagHandle));
     }
 
     if (millis - last_commu_timeNow > NO_COMMU_TIMEOUT){
@@ -1418,8 +1419,9 @@ void mainTask(void *argument)
         // Check for 0xAC (GS ACK) before COMMU decode
         if (temp_commu_data_buff[1] == 0xAC) {
             printf("[OBC] Received ACK from GS\r\n");
-            osEventFlagsClear(systemStateFlagHandle, SYSTEM_STATE_WAIT_ACK);
+            osEventFlagsClear(systemStateFlagHandle, SYSTEM_STATE_WAIT_ACK | SYSTEM_STATE_BEACON);
             osEventFlagsSet(systemStateFlagHandle, SYSTEM_STATE_DOWNLINK);
+            osMutexRelease(uartMutexHandle);
             continue; // Skip COMMU decode for ACK
         }
         
@@ -1618,7 +1620,7 @@ void mainTask(void *argument)
                 }
                 downlink_file_data = requested_file;
                 printf("file_name : %s chunk_len : %d, file_offset %ld\r\n",requested_file.file_name,requested_file.chunk_len,requested_file.file_offset);
-                osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+                osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_BEACON | SYSTEM_STATE_WAIT_ACK);
                 osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
                 last_commu_timeNow = millis;
                 break;
