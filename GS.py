@@ -299,6 +299,14 @@ def main():
                                                         if dl_active and dl == dl_chunk_size:
                                                             dl_offset += dl_chunk_size
                                                             retry_count = 0
+                                                            # Stop if we've received all expected bytes
+                                                            if dl_total_size > 0 and dl_offset >= dl_total_size:
+                                                                elapsed_time = time.time() - dl_start_time
+                                                                avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 else 0
+                                                                speed_str = f"{avg_speed / 1024:.1f} KB/s" if avg_speed >= 1024 else f"{avg_speed:.1f} B/s"
+                                                                print(f"     \033[92m[GS] Download Complete! '{current_download_file}' is fully retrieved.\033[0m")
+                                                                print(f"     \033[92m[GS] Total Time: {elapsed_time:.2f}s | Avg Speed: {speed_str}\033[0m")
+                                                                dl_active = False
                                                         elif dl_active and dl < dl_chunk_size:
                                                             elapsed_time = time.time() - dl_start_time
                                                             avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 and dl_total_size > 0 else 0
