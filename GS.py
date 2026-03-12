@@ -163,6 +163,7 @@ def main():
                 current_download_file = fname
                 dl_filename_bytes = fname.encode()
                 dl_offset = 0
+                dl_session_start_offset = 0
                 dl_active = True
                 dl_total_size = 0
                 dl_start_time = 0.0
@@ -259,12 +260,15 @@ def main():
                                                         partial = os.path.getsize(filepath)
                                                         if 0 < partial < size:
                                                             dl_offset = partial
+                                                            dl_session_start_offset = partial  # don't count pre-existing bytes in speed
                                                             print(f"     [GS] Partial file found ({partial}/{size} B). Resuming...")
                                                         else:
                                                             dl_offset = 0
+                                                            dl_session_start_offset = 0
                                                             print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
                                                     else:
                                                         dl_offset = 0
+                                                        dl_session_start_offset = 0
                                                         print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
                                                     req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
                                                     command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request File Initial", req_data))
@@ -301,8 +305,9 @@ def main():
                                                             bar = '=' * filled + '-' * (bar_len - filled)
                                                             
                                                             elapsed = time.time() - dl_start_time
-                                                            speed = (offset + dl) / elapsed if elapsed > 0 else 0
-                                                            speed_str = f"{speed / 1024:.1f} KB/s" if speed >= 1024 else f"{(speed):.1f} B/s"
+                                                            bytes_this_session = (offset + dl) - dl_session_start_offset
+                                                            speed = bytes_this_session / elapsed if elapsed > 0 else 0
+                                                            speed_str = f"{speed / 1024:.1f} KB/s" if speed >= 1024 else f"{speed:.1f} B/s"
                                                             
                                                             rem_bytes = dl_total_size - (offset + dl)
                                                             eta = rem_bytes / speed if speed > 0 else 0
@@ -318,14 +323,16 @@ def main():
                                                             # Stop if we've received all expected bytes
                                                             if dl_total_size > 0 and dl_offset >= dl_total_size:
                                                                 elapsed_time = time.time() - dl_start_time
-                                                                avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 else 0
+                                                                bytes_this_session = dl_total_size - dl_session_start_offset
+                                                                avg_speed = bytes_this_session / elapsed_time if elapsed_time > 0 else 0
                                                                 speed_str = f"{avg_speed / 1024:.1f} KB/s" if avg_speed >= 1024 else f"{avg_speed:.1f} B/s"
                                                                 print(f"     \033[92m[GS] Download Complete! '{current_download_file}' is fully retrieved.\033[0m")
                                                                 print(f"     \033[92m[GS] Total Time: {elapsed_time:.2f}s | Avg Speed: {speed_str}\033[0m")
                                                                 dl_active = False
                                                         elif dl_active and dl < dl_chunk_size:
                                                             elapsed_time = time.time() - dl_start_time
-                                                            avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 and dl_total_size > 0 else 0
+                                                            bytes_this_session = (dl_offset + dl) - dl_session_start_offset
+                                                            avg_speed = bytes_this_session / elapsed_time if elapsed_time > 0 and bytes_this_session > 0 else 0
                                                             speed_str = f"{avg_speed / 1024:.1f} KB/s" if avg_speed >= 1024 else f"{avg_speed:.1f} B/s"
                                                             print(f"     \033[92m[GS] Download Complete! '{current_download_file}' is fully retrieved.\033[0m")
                                                             print(f"     \033[92m[GS] Total Time: {elapsed_time:.2f}s | Avg Speed: {speed_str}\033[0m")
