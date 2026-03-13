@@ -40,6 +40,8 @@ Handles standard packet delimiting overhead.
   * `0x01`: **VR Payload** (Pi Zero 2W)
 * **`PID` (Type):** The specific action requested within the subsystem context.
   * e.g., For `PayloadID 0x00`, `PID 0x00` means *List SD Files*. For `PayloadID 0x01`, `PID 0x00` means *Get Pi Status*.
+  * **`0x00`–`0x7F`:** Normal / read-only commands.
+  * **`0x90`–`0xFF`:** **Dangerous / irreversible commands** (e.g., shutdown). Reserved range to prevent accidental execution.
 * **`DataLen`:** 16-bit Big-Endian length of the following `Data` field.
 
 ### 3. Application Layer (Data Payload)
@@ -138,6 +140,16 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- |
     | 1B |
 
+**Request VR Shutdown `(PID: 0x90)`**
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (0 byte):** ACK only — the Pi sends an empty ACK frame then immediately executes `sudo shutdown -h now`. No further response will be received.
+    | Data |
+    | :--- |
+    | -    |
+
 #### 3. Core Sensors / EPS (PayloadID: `0x00`)
 
 **Unsolicited EPS Beacon `(PID: 0x04)`**
@@ -168,6 +180,7 @@ Commands:
   status                - Request Pi Status
   capture               - Request Image Capture
   copy                  - Request Copy Image to SD
+  shutdown              - Shutdown the VR Raspberry Pi
   exit                  - Exit Ground Station
 GS> 
 ```

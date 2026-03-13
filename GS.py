@@ -64,6 +64,7 @@ def cli_thread():
                 print("  status                - Request Pi Status")
                 print("  capture               - Request Image Capture")
                 print("  copy                  - Request Copy Image to SD")
+                print("  shutdown              - Shutdown the VR Raspberry Pi")
                 print("  exit                  - Exit Ground Station")
             elif cmd == 'ping':
                 if len(parts) > 1 and parts[1].lower() == 'obc':
@@ -93,6 +94,8 @@ def cli_thread():
                 command_queue.put(('MANUAL', 0x01, 0x02, "Request Capture (VR)", b''))
             elif cmd == 'copy':
                 command_queue.put(('MANUAL', 0x01, 0x03, "Request Copy Image to SD (VR)", b''))
+            elif cmd == 'shutdown':
+                command_queue.put(('MANUAL', 0x01, 0x90, "Request VR Shutdown", b''))
             elif cmd == 'exit':
                 print("Exiting...")
                 os._exit(0)
@@ -377,6 +380,9 @@ def main():
                                             status = struct.unpack('>B', data[:1])[0]
                                             s_str = "OK" if status == 0 else "Error"
                                             print(f"     Copy to SD -> Status: {s_str} ({status})")
+
+                                        elif pid == 0x90: # Shutdown VR Pi (dangerous command)
+                                            print(f"     VR Shutdown -> ACK received. Raspberry Pi is shutting down.")
 
                                 except Exception as e:
                                     print(f"     \033[91mParse Error:\033[0m {e} (Raw: {data.hex()})")

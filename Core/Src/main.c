@@ -240,6 +240,8 @@ const osSemaphoreAttr_t sdTxSemaphoreAttr = {
 #define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000004U
 #define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000008U
 #define PAYLOAD_FLAG_IMAGE_DATA       0x00000010U
+/* 0x9X PIDs are dangerous / irreversible — use a dedicated flag */
+#define PAYLOAD_FLAG_SHUTDOWN         0x00000040U
 
 // usb_data_t usb_buff;
 
@@ -1456,6 +1458,10 @@ void mainTask(void *argument)
             case PID_GS_VR_REQUEST_PING:
               printf("GS Requests PI Ping\r\n");
               break;
+            case PID_GS_VR_REQUEST_SHUTDOWN:
+              printf("GS Requests VR Shutdown (DANGEROUS)\r\n");
+              osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_SHUTDOWN);
+              break;
             default:
               printf("GS PID that does not exists in the system\r\n");
               break;
@@ -1656,6 +1662,14 @@ void mainTask(void *argument)
         uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,NULL,0,KISS_CMD_DATA, cmd_encoded);
         CDC_Transmit_FS(cmd_encoded,req_len);
       }
+      else if (payloadFlag & PAYLOAD_FLAG_SHUTDOWN){
+        osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE | PAYLOAD_FLAG_SHUTDOWN);
+        uint8_t cmd_encoded[32] = {0};
+        uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_VR_PID_SHUTDOWN,
+                                          NULL, 0, KISS_CMD_DATA, cmd_encoded);
+        CDC_Transmit_FS(cmd_encoded, req_len);
+        printf("Shutdown command sent to VR Pi (PID=0x90)\r\n");
+      }
     }
 
   }
@@ -1784,6 +1798,13 @@ void usbTask(void *argument)
                 {
                     printf("Payload acks Capture\r\n");
                     osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_POLL_CAPTURE);
+                    osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+                    payload_commu_state = PAYLOAD_STATE_IDLE;
+                }
+                if (flag & PAYLOAD_FLAG_SHUTDOWN)
+                {
+                    printf("VR Pi acknowledged shutdown\r\n");
+                    osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_SHUTDOWN);
                     osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
                     payload_commu_state = PAYLOAD_STATE_IDLE;
                 }

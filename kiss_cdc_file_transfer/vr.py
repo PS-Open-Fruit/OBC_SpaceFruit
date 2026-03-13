@@ -180,6 +180,7 @@ VR_PID_GET_IMAGE_CAPTURE    = 0x01
 VR_PID_IMAGE_REQUEST        = 0x02
 VR_PID_IMAGE_DOWNLOAD       = 0x03
 VR_PID_IMAGE_DOWNLOAD_DONE  = 0x05
+VR_PID_SHUTDOWN             = 0x90  # 0x9X for dangerous command range
 
 PID_ACK                     = 0xAC
 
@@ -418,6 +419,20 @@ def getCaptureRequest():
                     file_mode        = FILE_MODE_CHUNK
             else:
                 Log.warn(f"IMAGE REQUEST had unexpected data_len={frame['data_len']} — ignoring")
+
+        # ── SHUTDOWN COMMAND ──────────────────────────────────
+        elif pid == VR_PID_SHUTDOWN:
+            Log.cmd("SHUTDOWN command received — sending ACK then shutting down")
+            reply = KISS.wrap_frame(PAYLOAD_ID_VR, PID_ACK, b'')
+            send_data(reply)
+            Log.ok("ACK sent for SHUTDOWN — initiating system shutdown now")
+            import subprocess
+            # Use 'systemctl poweroff' instead of 'shutdown -h now':
+            # systemctl sends a D-Bus message to PID 1 (systemd) and returns
+            # immediately, so the child process doesn't need to outlive the
+            # service cgroup. 'shutdown' is a long-running daemon that gets
+            # killed by systemd when the service exits before it can act.
+            subprocess.run(["sudo", "systemctl", "poweroff"])
 
         # ── UNKNOWN PID ───────────────────────────────────────
         else:

@@ -184,6 +184,7 @@ def main():
                                     elif pid == 0x01: print("  -> Action: Request Pi Status")
                                     elif pid == 0x02: print("  -> Action: Request Capture")
                                     elif pid == 0x03: print("  -> Action: Request Copy Image to SD")
+                                    elif pid == 0x90: print("  -> Action: Request VR Shutdown (DANGEROUS)")
                                     else: print("  -> Action: Unknown VR Command")
                                 else:
                                     print("  -> Routing to: Unknown Subsystem!")
@@ -300,6 +301,10 @@ def main():
                                             print(f"  -> Emulated Copy Error: {e}")
                                             # Status 0x01 = Error
                                             dummy_data = struct.pack('>B', 0x01)
+
+                                    elif pid == 0x90: # Shutdown VR Pi (dangerous command, 0x9X range)
+                                        print("  -> Emulated VR Shutdown: Sending ACK (real Pi would halt after this)")
+                                        dummy_data = b''  # Empty payload — mirrors the ACK the real Pi sends
                                             
                                         
                                 # Send response (Command 0x01) for non-streaming commands

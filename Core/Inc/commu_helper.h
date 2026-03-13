@@ -17,6 +17,7 @@ typedef enum {
   PID_GS_VR_REQUEST_PI_STATUS,
   PID_GS_VR_REQUEST_CAPTURE,
   PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,
+  PID_GS_VR_REQUEST_SHUTDOWN = 0x90,
 } commu_payload_vr_pid;
 
 typedef enum {
