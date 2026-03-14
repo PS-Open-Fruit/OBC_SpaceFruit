@@ -2,7 +2,7 @@ name: STM32 MISRA C Check
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "dev" ]
 
 jobs:
   misra-analysis:
@@ -41,8 +41,12 @@ jobs:
                    --force \
                    --xml --xml-version=2 \
                    --output-file=cppcheck_report.xml \
-                   -I OBC_STM32/Core/Inc \
-                   OBC_STM32/Core
+                   -I Core/Inc \
+                   Core/Src \
+                   obc-drivers/inc \
+                   obc-drivers/src \
+                   obc-protocols/inc \
+                   obc-protocols/src
 
       - name: Convert to SARIF
         uses: Flast/cppcheck-sarif@v2
