@@ -21,10 +21,15 @@ def get_md5(fname):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
+# ANSI Color Codes
+CLR_YELLOW = "\033[93m"
+CLR_RED    = "\033[91m"
+CLR_GREEN  = "\033[92m"
+CLR_RESET  = "\033[0m"
+
 def main():
     parser = argparse.ArgumentParser(description="Scenario 3B: Image Downlink Aggressive Resume")
     parser.add_argument("--gs_port", type=str, default="COM4", help="Serial port for GS.py")
-    parser.add_argument("--obc_port", type=str, default="COM5", help="Serial port for OBC.py")
     parser.add_argument("--baud", type=int, default=9600, help="Baud rate")
     parser.add_argument("--kill_interval", type=int, default=15, help="Seconds between GS termination")
     args = parser.parse_args()
@@ -33,21 +38,14 @@ def main():
     dest_file = os.path.join("downloads", "0.jpg")
 
     if not os.path.exists(source_file):
-        print(f"[ERROR] Source file {source_file} not found.")
-        sys.exit(1)
+        print(f"{CLR_YELLOW}[NOTE] Local reference file '{source_file}' not found. Test will run but MD5 verification will be skipped.{CLR_RESET}")
 
     if os.path.exists(dest_file):
         os.remove(dest_file)
 
     print(f"\n--- Starting Scenario 3B: Image Downlink Aggressive Resume ---")
-    print(f"File: {source_file}, GS Port: {args.gs_port}, OBC Port: {args.obc_port}")
+    print(f"File: {source_file}, GS Port: {args.gs_port}")
     print(f"Aggressive Kill Interval: {args.kill_interval}s")
-
-    # 1. Start OBC (stays running throughout)
-    obc_logs = []
-    obc_proc = subprocess.Popen([sys.executable, "-u", "OBC.py", "--port", args.obc_port, "--baud", str(args.baud)], 
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    threading.Thread(target=read_output, args=(obc_proc, "OBC", obc_logs), daemon=True).start()
 
     time.sleep(2)
 
@@ -103,16 +101,21 @@ def main():
 
         print(f"\n--- Test Results ---")
         if success:
-            src_md5 = get_md5(source_file)
-            dst_md5 = get_md5(dest_file)
-            print(f"Source MD5: {src_md5}")
-            print(f"Dest   MD5: {dst_md5}")
-            if src_md5 == dst_md5:
-                print(f"[SUCCESS] MD5 verification PASSED after {iteration} resume cycles.")
+            print(f"{CLR_GREEN}[SUCCESS]{CLR_RESET} Download completed.")
+            if os.path.exists(source_file):
+                src_md5 = get_md5(source_file)
+                dst_md5 = get_md5(dest_file)
+                print(f"Source MD5 (Local Reference): {src_md5}")
+                print(f"Dest   MD5 (Downloaded):      {dst_md5}")
+                if src_md5 == dst_md5:
+                    print(f"{CLR_GREEN}[SUCCESS]{CLR_RESET} MD5 verification PASSED after {iteration} resume cycles.")
+                else:
+                    print(f"{CLR_RED}[FAIL]{CLR_RESET} MD5 verification FAILED. Data corruption detected after multiple resumes.")
             else:
-                print("[FAIL] MD5 verification FAILED. Data corruption detected after multiple resumes.")
+                print(f"{CLR_YELLOW}[NOTE]{CLR_RESET} Local reference file '{source_file}' not found. Skipping MD5 verification.")
+                print(f"{CLR_GREEN}[SUCCESS]{CLR_RESET} Download finished, but data integrity was not verified against a local copy.")
         else:
-            print("[FAIL] Test failed to complete download.")
+            print(f"{CLR_RED}[FAIL]{CLR_RESET} Test failed to complete download.")
 
     except KeyboardInterrupt:
         print("\n[TEST] Interrupted by user.")
@@ -121,8 +124,6 @@ def main():
         if 'gs_proc' in locals() and gs_proc.poll() is None:
             gs_proc.terminate()
             gs_proc.wait()
-        obc_proc.terminate()
-        obc_proc.wait()
 
 if __name__ == "__main__":
     main()

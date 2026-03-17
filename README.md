@@ -182,5 +182,32 @@ Commands:
   copy                  - Request Copy Image to SD
   shutdown              - Shutdown the VR Raspberry Pi
   exit                  - Exit Ground Station
-GS> 
 ```
+## Automated Testing (Stress Test)
+
+The `test_resume_downlink.py` script is a stress test designed to validate the reliability of the file download resume mechanism. It simulates multiple connection drops by repeatedly terminating and restarting the Ground Station process.
+
+### Scenario: Aggressive Resume (Stress Test)
+- **Objective**: Ensure 100% data integrity of a large file (e.g., `0.jpg`) across multiple forced interruptions.
+- **Process**: Starts `GS.py`, starts download, kills `GS.py` every 15s, restarts, and resumes until finished.
+- **Visual Feedback**: The terminal output is **color-coded** (Yellow/Green/Red) to highlight notes, success states, and failures for better readability.
+- **Integrity**: Verified by MD5 hash comparison at the end. The script compares the MD5 of a **local reference file** (`sd_card/0.jpg`) with the downloaded file (`downloads/0.jpg`). 
+    - *Note: If `sd_card/0.jpg` is missing from your PC, the test will still run and complete, but it will skip the MD5 verification step.*
+
+### How to Run with Real OBC
+1.  **Hardware setup**: Connect your STM32 OBC to your PC. Identify the COM port (e.g., `COM5`).
+2.  **Run the test**: 
+    ```powershell
+    python test_resume_downlink.py --gs_port COM4 --kill_interval 15
+    ```
+    *Note: Adjust `--gs_port` to match your local Ground Station RF bridge port. The script assumes the real OBC is already listening on the other side of the RF link.*
+
+### How to Run with Emulator
+1.  **Terminal 1 (OBC)**:
+    ```powershell
+    python OBC.py --port COM5
+    ```
+2.  **Terminal 2 (Test Harness)**:
+    ```powershell
+    python test_resume_downlink.py --gs_port COM4 --kill_interval 15
+    ```
