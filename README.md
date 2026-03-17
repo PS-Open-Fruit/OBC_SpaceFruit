@@ -190,9 +190,9 @@ The `test_resume_downlink.py` script is a stress test designed to validate the r
 ### Scenario: Aggressive Resume (Stress Test)
 - **Objective**: Ensure 100% data integrity of a large file (e.g., `0.jpg`) across multiple forced interruptions.
 - **Process**: Starts `GS.py`, starts download, kills `GS.py` every 15s, restarts, and resumes until finished.
-- **Visual Feedback**: The terminal output is **color-coded** (Yellow/Green/Red) to highlight notes, success states, and failures for better readability.
-- **Integrity**: Verified by MD5 hash comparison at the end. The script compares the MD5 of a **local reference file** (`sd_card/0.jpg`) with the downloaded file (`downloads/0.jpg`). 
-    - *Note: If `sd_card/0.jpg` is missing from your PC, the test will still run and complete, but it will skip the MD5 verification step.*
+- **CSV Logging**: Automatically records download progress (`test_telemetry.csv`) and connection drop events (`test_kills.csv`).
+- **External Visualization**: Use the `visualize_results.py` script to generate performance charts.
+    - *Requires: `pip install pandas matplotlib`*
 
 ### How to Run with Real OBC
 1.  **Hardware setup**: Connect your STM32 OBC to your PC. Identify the COM port (e.g., `COM5`).
@@ -200,7 +200,16 @@ The `test_resume_downlink.py` script is a stress test designed to validate the r
     ```powershell
     python test_resume_downlink.py --gs_port COM4 --kill_interval 15
     ```
-    *Note: Adjust `--gs_port` to match your local Ground Station RF bridge port. The script assumes the real OBC is already listening on the other side of the RF link.*
+3.  **Visualize results**:
+    ```powershell
+    python visualize_results.py --csv test_telemetry.csv --kills test_kills.csv
+    ```
+
+### Visualization Controls
+You can customize the output filenames and data sources:
+```powershell
+python visualize_results.py --csv my_data.csv --kills my_drops.csv --output my_chart.png
+```
 
 ### How to Run with Emulator
 1.  **Terminal 1 (OBC)**:
