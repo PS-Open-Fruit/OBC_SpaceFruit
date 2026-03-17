@@ -11,15 +11,16 @@ import random
 import sys
 from Shared.Python.kiss_protocol import KISSProtocol
 
+import argparse
+
 # --- CONFIGURATION ---
 _PORTS = {
     'darwin': '/dev/cu.usbserial-XXXXXXXX',
     'win32':  'COM5',
-    'linux':  '/dev/ttyUSB0',
+    'linux':  '/dev/ttyUSB1',
 }
-PORT = _PORTS.get(sys.platform, _PORTS['win32'])
-print(f"[OBC] Platform: {sys.platform} -> Using port: {PORT}")
-BAUD = 9600
+DEFAULT_PORT = _PORTS.get(sys.platform, _PORTS['win32'])
+DEFAULT_BAUD = 9600
 
 # --- SUBSYSTEMS ---
 OBC_SUBSYSTEM = 0x00
@@ -121,8 +122,16 @@ def generate_dummy_beacon_data() -> bytes:
     return bytes(b)
 
 def main():
-    ser = serial.Serial(PORT, BAUD, timeout=0.1)
-    print(f"OBC Started on {PORT}. Waiting for Ground Station requests...")
+    parser = argparse.ArgumentParser(description="OBC Emulator")
+    parser.add_argument("--port", type=str, default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
+    parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"Baud rate (default: {DEFAULT_BAUD})")
+    args = parser.parse_args()
+
+    port = args.port
+    baud = args.baud
+
+    ser = serial.Serial(port, baud, timeout=0.1)
+    print(f"OBC Started on {port} at {baud} baud. Waiting for Ground Station requests...")
     
     FEND_BYTE = bytes([KISSProtocol.FEND])
     rx_buffer = bytearray()

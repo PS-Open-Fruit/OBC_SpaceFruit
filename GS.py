@@ -12,15 +12,16 @@ import sys
 from Shared.Python.beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
 
+import argparse
+
 # --- CONFIGURATION ---
 _PORTS = {
     'darwin': '/dev/cu.usbserial-A10OMHTZ',
     'win32':  'COM4',
     'linux':  '/dev/ttyUSB0',
 }
-PORT = _PORTS.get(sys.platform, _PORTS['win32'])
-print(f"[GS] Platform: {sys.platform} -> Using port: {PORT}")
-BAUD = 9600
+DEFAULT_PORT = _PORTS.get(sys.platform, _PORTS['win32'])
+DEFAULT_BAUD = 9600
 
 
 def colorize_raw_frame(frame: bytes) -> str:
@@ -48,7 +49,8 @@ def cli_thread():
     print("Type 'help' for a list of available commands.")
     while True:
         try:
-            choice = input("GS> ").strip()
+            print("GS> ", end="", flush=True)
+            choice = sys.stdin.readline().strip()
             if not choice:
                 continue
             
@@ -98,9 +100,11 @@ def cli_thread():
                 command_queue.put(('MANUAL', 0x01, 0x90, "Request VR Shutdown", b''))
             elif cmd == 'exit':
                 print("Exiting...")
+                sys.stdout.flush()
                 os._exit(0)
             else:
                 print(f"Unknown command: {choice}. Type 'help' for commands.")
+            sys.stdout.flush()
         except Exception as e:
             print(f"Input Error: {e}")
 
@@ -124,9 +128,18 @@ def parse_custom_payload(payload_bytes: bytes):
     return payload_id, pid, seq_num, data
 
 def main():
+    parser = argparse.ArgumentParser(description="Ground Station CLI")
+    parser.add_argument("--port", type=str, default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
+    parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"Baud rate (default: {DEFAULT_BAUD})")
+    parser.add_argument("--test", action="store_true", help="Enable test mode (no interactive prompt)")
+    args = parser.parse_args()
+
+    port = args.port
+    baud = args.baud
+
     global beacon_count, last_beacon_rx_time, latest_beacon_data
-    ser = serial.Serial(PORT, BAUD, timeout=0.1)
-    print(f"Ground Station Started on {PORT}.")
+    ser = serial.Serial(port, baud, timeout=0.1)
+    print(f"Ground Station Started on {port} at {baud} baud.")
     
     FEND_BYTE = bytes([KISSProtocol.FEND])
     rx_buffer = bytearray()
@@ -197,6 +210,7 @@ def main():
             print("  Color Legend: \033[90mFEND\033[0m \033[95mCMD\033[0m \033[94mSEQ\033[0m \033[93mPL_ID\033[0m \033[96mPID\033[0m \033[92mLEN\033[0m \033[97mDATA\033[0m \033[91mCRC\033[0m \033[90mFEND\033[0m")
             print(f"  -> TX Raw Frame: {colorize_raw_frame(req_frame)}")
             ser.write(req_frame)
+            sys.stdout.flush()
             
             if dl_active:
                 last_request_time = time.time()
