@@ -65,6 +65,7 @@ def main():
     
     # Progress regex: "Offset: 12345"
     progress_regex = re.compile(r"Offset:\s*(\d+)")
+    last_known_offset = 0
 
     time.sleep(2)
 
@@ -97,6 +98,7 @@ def main():
                     match = progress_regex.search(line)
                     if match:
                         offset = int(match.group(1))
+                        last_known_offset = offset
                         # Append to CSV in real-time
                         try:
                             with open(args.csv, 'a', newline='') as f:
@@ -120,6 +122,12 @@ def main():
             # Simulated connection drop
             offline_start = time.time()
             
+            # Log "flat-line" point at start of offline
+            try:
+                with open(args.csv, 'a', newline='') as f:
+                    csv.writer(f).writerow([offline_start, last_known_offset])
+            except: pass
+
             print(f"\n[ITERATION {iteration}] SIMULATING CONNECTION DROP (Terminating GS after {args.kill_interval}s)...")
             gs_proc.terminate()
             gs_proc.wait()
@@ -131,6 +139,12 @@ def main():
             
             offline_end = time.time()
             
+            # Log "flat-line" point at end of offline
+            try:
+                with open(args.csv, 'a', newline='') as f:
+                    csv.writer(f).writerow([offline_end, last_known_offset])
+            except: pass
+
             # Log offline range
             try:
                 with open(args.kills_csv, 'a', newline='') as f:
