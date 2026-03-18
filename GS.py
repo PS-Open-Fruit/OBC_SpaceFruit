@@ -63,7 +63,7 @@ def cli_thread():
                 print("  list                  - List files on OBC SD card")
                 print("  info <filename>       - Request file info")
                 print("  download <filename>   - Download file from OBC")
-                print("  status                - Request Pi Status")
+                print("  status                - Request System Status (via OBC)")
                 print("  capture               - Request Image Capture")
                 print("  copy                  - Request Copy Image to SD")
                 print("  shutdown              - Shutdown the VR Raspberry Pi")
@@ -91,7 +91,7 @@ def cli_thread():
                 else:
                     print("Usage: download <filename>")
             elif cmd == 'status':
-                command_queue.put(('MANUAL', 0x01, 0x01, "Request Pi Status (VR)", b''))
+                command_queue.put(('MANUAL', 0x00, 0x05, "Request System Status (OBC)", b''))
             elif cmd == 'capture':
                 command_queue.put(('MANUAL', 0x01, 0x02, "Request Capture (VR)", b''))
             elif cmd == 'copy':
@@ -373,6 +373,46 @@ def main():
                                                 print("") # Force a newline over the GS> prompt
                                                 print_decoded_beacon_data(ret_beacon_dict)
                                                 print("GS> ", end="", flush=True) # Reprint prompt after jumping
+
+                                        elif pid == 0x05: # System Status (OBC + EPS + Payload)
+                                            expected_len = struct.calcsize('>IBBIIIBiIIBBBB')
+                                            if len(data) != expected_len:
+                                                print(f"     \033[93m[GS] System Status length mismatch: got {len(data)}B, expected {expected_len}B\033[0m")
+                                            else:
+                                                (
+                                                    obc_boot_count,
+                                                    usb_bus_status,
+                                                    eps_status,
+                                                    payload_boot_count,
+                                                    payload_timestamp,
+                                                    payload_uptime,
+                                                    payload_cpu_load,
+                                                    payload_cpu_temp_milli,
+                                                    payload_ram_mb,
+                                                    payload_disk_mb,
+                                                    payload_camera_status,
+                                                    payload_throttled,
+                                                    payload_file_count,
+                                                    payload_load_avg,
+                                                ) = struct.unpack('>IBBIIIBiIIBBBB', data)
+
+                                                usb_str = "OK" if usb_bus_status == 0x00 else "Busy"
+                                                eps_str = "OK" if eps_status == 0x00 else "No Response"
+                                                cam_str = {0:"Err", 1:"Ready", 2:"Busy"}.get(payload_camera_status, "Unknown")
+                                                payload_cpu_temp_c = payload_cpu_temp_milli / 1000.0
+
+                                                print(
+                                                    f"     System Status -> OBC Boot: {obc_boot_count} | USB: {usb_str} ({usb_bus_status}) | EPS: {eps_str} ({eps_status})"
+                                                )
+                                                print(
+                                                    f"                       Payload Boot: {payload_boot_count} | Time: {payload_timestamp} | Up: {payload_uptime}s"
+                                                )
+                                                print(
+                                                    f"                       CPU: {payload_cpu_load}% ({payload_cpu_temp_c:.3f}C) | RAM: {payload_ram_mb}MB | Disk: {payload_disk_mb}MB"
+                                                )
+                                                print(
+                                                    f"                       CAM: {cam_str} ({payload_camera_status}) | Throttled: {payload_throttled} | Files: {payload_file_count} | LoadAvg: {payload_load_avg}"
+                                                )
                                             
                                             
                                     elif p_id == 0x01:

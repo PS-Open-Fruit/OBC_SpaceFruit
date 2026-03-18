@@ -121,6 +121,28 @@ def generate_dummy_beacon_data() -> bytes:
     
     return bytes(b)
 
+def get_dummy_pi_status_snapshot():
+    """Emulates OBC polling VR payload status (internal PID 0x01 request)."""
+    now_ts = int(time.time())
+    try:
+        file_count = sum(1 for f in os.listdir(PI_FILES_DIR) if os.path.isfile(os.path.join(PI_FILES_DIR, f)))
+    except Exception:
+        file_count = 0
+
+    return {
+        "boot_count": 3,
+        "timestamp": now_ts,
+        "uptime": 3600,
+        "cpu_load": 15,
+        "cpu_temp_milli": 45250,  # fixed-point x1000
+        "ram_usage_mb": 512,
+        "disk_usage_mb": 2048,
+        "camera_status": 0x01,
+        "throttled": 0,
+        "file_count": min(file_count, 255),
+        "load_avg": 8,
+    }
+
 def main():
     parser = argparse.ArgumentParser(description="OBC Emulator")
     parser.add_argument("--port", type=str, default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
@@ -187,6 +209,7 @@ def main():
                                     elif pid == 0x01: print("  -> Action: Request List files")
                                     elif pid == 0x02: print("  -> Action: Request File Info")
                                     elif pid == 0x03: print("  -> Action: Request File Data")
+                                    elif pid == 0x05: print("  -> Action: Request System Status (OBC -> VR Poll)")
                                     else: print("  -> Action: Unknown OBC Command")
                                         
                                 elif p_id == VR_SUBSYSTEM:
@@ -250,6 +273,7 @@ def main():
                                                 for _ in range(5):  # DOWNLINK_WINDOW_SIZE = 5
                                                     if cur_offset >= filesize:
                                                         break
+                                                    chunk = b''
                                                     try:
                                                         with open(fpath, 'rb') as f:
                                                             f.seek(cur_offset)
@@ -272,6 +296,32 @@ def main():
                                                 dummy_data = struct.pack('>BIH', 0x01, 0, 0)
                                         else:
                                             dummy_data = struct.pack('>BIH', 0x01, 0, 0)
+
+                                    elif pid == 0x05: # System Status (GS->OBC, OBC internally polls VR status PID 0x01)
+                                        print("  -> Internal Poll: OBC -> VR Request Pi Status (PID 0x01)")
+                                        pi_status = get_dummy_pi_status_snapshot()
+
+                                        obc_boot_count = 12
+                                        usb_bus_status = 0x00  # 0x00 = OK, 0x01 = Busy
+                                        eps_status = 0x00      # 0x00 = OK, 0x01 = No Response
+
+                                        dummy_data = struct.pack(
+                                            '>IBBIIIBiIIBBBB',
+                                            obc_boot_count,
+                                            usb_bus_status,
+                                            eps_status,
+                                            pi_status["boot_count"],
+                                            pi_status["timestamp"],
+                                            pi_status["uptime"],
+                                            pi_status["cpu_load"],
+                                            pi_status["cpu_temp_milli"],
+                                            pi_status["ram_usage_mb"],
+                                            pi_status["disk_usage_mb"],
+                                            pi_status["camera_status"],
+                                            pi_status["throttled"],
+                                            pi_status["file_count"],
+                                            pi_status["load_avg"],
+                                        )
 
                                 elif p_id == VR_SUBSYSTEM:
                                     if pid == 0x00: # Ping
