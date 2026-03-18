@@ -33,7 +33,7 @@ def parse_custom_payload(payload_bytes: bytes):
     received_crc = struct.unpack('>I', payload_bytes[-4:])[0]
     calculated_crc = KISSProtocol.calculate_crc(content)
     if received_crc != calculated_crc:
-        return ("CRC_ERROR", received_crc, calculated_crc)
+        return ("CRC_ERROR", received_crc, calculated_crc, b"")
     
     seq_num, payload_id, pid, data_len = struct.unpack('>BBBH', content[:5])
     data = content[5:5+data_len]
@@ -52,14 +52,246 @@ def get_packet_description(cmd, p_id, pid):
         elif pid == 0x02: desc = "File Info"
         elif pid == 0x03: desc = "File Data"
         elif pid == 0x04: desc = "Beacon"
+        elif pid == 0x05: desc = "System Status"
+        elif pid == 0xAC: desc = "ACK"
     elif p_id == 0x01: # VR
         if pid == 0x00: desc = "Ping"
         elif pid == 0x01: desc = "Pi Status"
         elif pid == 0x02: desc = "Capture"
         elif pid == 0x03: desc = "Copy to SD"
+        elif pid == 0x04: desc = "Check Copy"
         elif pid == 0x90: desc = "Shutdown"
+        elif pid == 0xAC: desc = "ACK"
         
     return f"{source} -> {dest} | {subsystem} {desc}"
+
+def _parse_len_prefixed_filename(data: bytes):
+    if len(data) < 1:
+        return None, "Missing filename length byte"
+    name_len = data[0]
+    if len(data) < 1 + name_len:
+        return None, f"Filename truncated: expected {name_len}B, got {len(data)-1}B"
+    name_raw = data[1:1+name_len]
+    try:
+        name = name_raw.decode('utf-8')
+    except Exception:
+        name = name_raw.decode('utf-8', errors='replace')
+    remainder = data[1+name_len:]
+    return (name, remainder), None
+
+def decode_layer3_data(cmd, p_id, pid, data: bytes):
+    lines = []
+
+    if cmd == 0x00:
+        lines.append("Layer3: Request")
+        if p_id == 0x00:  # OBC requests
+            if pid in (0x00, 0x01, 0x04, 0x05):
+                lines.append(f"Data: empty ({len(data)}B)")
+            elif pid == 0x02:  # File Info request
+                parsed, err = _parse_len_prefixed_filename(data)
+                if err:
+                    lines.append(f"Decode warning: {err}")
+                else:
+                    if parsed is None:
+                        lines.append("Decode warning: filename parse failed")
+                        return lines
+                    name, rem = parsed
+                    lines.append(f"Filename: {name}")
+                    if rem:
+                        lines.append(f"Trailing bytes: {rem.hex(' ').upper()}")
+            elif pid == 0x03:  # File Data request
+                parsed, err = _parse_len_prefixed_filename(data)
+                if err:
+                    lines.append(f"Decode warning: {err}")
+                else:
+                    if parsed is None:
+                        lines.append("Decode warning: filename parse failed")
+                        return lines
+                    name, rem = parsed
+                    if len(rem) < 6:
+                        lines.append(f"Filename: {name}")
+                        lines.append(f"Decode warning: missing offset/chunk fields (need 6B, got {len(rem)}B)")
+                    else:
+                        offset, chunk_len = struct.unpack('>IH', rem[:6])
+                        lines.append(f"Filename: {name}")
+                        lines.append(f"Offset: {offset} | ChunkLen: {chunk_len}")
+                        if len(rem) > 6:
+                            lines.append(f"Trailing bytes: {rem[6:].hex(' ').upper()}")
+            else:
+                if data:
+                    lines.append(f"Raw Data: {data.hex(' ').upper()}")
+
+        elif p_id == 0x01:  # VR requests
+            if pid in (0x00, 0x01, 0x02, 0x03, 0x04, 0x90):
+                lines.append(f"Data: empty ({len(data)}B)")
+            else:
+                if data:
+                    lines.append(f"Raw Data: {data.hex(' ').upper()}")
+
+        return lines
+
+    if cmd == 0x01:
+        lines.append("Layer3: Data/Response")
+        if p_id == 0x00:  # OBC responses
+            if pid == 0x00:  # Ping
+                lines.append(f"Ping ACK payload length: {len(data)}B")
+
+            elif pid == 0x01:  # List files
+                if len(data) < 1:
+                    lines.append("Decode warning: missing file count byte")
+                else:
+                    num_files = data[0]
+                    lines.append(f"File count: {num_files}")
+                    offset = 1
+                    for i in range(num_files):
+                        if offset >= len(data):
+                            lines.append(f"Decode warning: truncated at file index {i}")
+                            break
+                        name_len = data[offset]
+                        start = offset + 1
+                        end = start + name_len
+                        if end > len(data):
+                            lines.append(f"Decode warning: file name #{i+1} truncated")
+                            break
+                        name_raw = data[start:end]
+                        try:
+                            name = name_raw.decode('utf-8')
+                        except Exception:
+                            name = name_raw.decode('utf-8', errors='replace')
+                        lines.append(f"  [{i+1}] {name}")
+                        offset = end
+                    if offset < len(data):
+                        lines.append(f"Trailing bytes: {data[offset:].hex(' ').upper()}")
+
+            elif pid == 0x02:  # File info response
+                if len(data) < struct.calcsize('>BII'):
+                    lines.append(f"Decode warning: FileInfo needs 9B, got {len(data)}B")
+                else:
+                    status, size, ts = struct.unpack('>BII', data[:9])
+                    status_str = {0: "OK", 1: "Error"}.get(status, f"0x{status:02X}")
+                    lines.append(f"Status: {status_str} ({status}) | Size: {size} B | Created: {ts}")
+                    if len(data) > 9:
+                        lines.append(f"Trailing bytes: {data[9:].hex(' ').upper()}")
+
+            elif pid == 0x03:  # File data chunk
+                if len(data) < struct.calcsize('>BIH'):
+                    lines.append(f"Decode warning: FileData header needs 7B, got {len(data)}B")
+                else:
+                    status, offset, dl = struct.unpack('>BIH', data[:7])
+                    chunk = data[7:7+dl]
+                    lines.append(f"Status: {status} | Offset: {offset} | ChunkLen: {dl}")
+                    lines.append(f"Chunk bytes available: {len(chunk)}")
+                    if len(chunk) != dl:
+                        lines.append(f"Decode warning: chunk length mismatch (header {dl}, actual {len(chunk)})")
+                    if len(data) > 7 + len(chunk):
+                        lines.append(f"Trailing bytes: {data[7+len(chunk):].hex(' ').upper()}")
+
+            elif pid == 0x04:  # Beacon
+                beacon = decode_beacon_packet(data)
+                if beacon:
+                    lines.append(
+                        f"Beacon: V_Batt={beacon.get('v_batt',0)}V, I_Batt={beacon.get('i_batt',0)}mA, Temp={beacon.get('temp_eps',0)}C"
+                    )
+                else:
+                    lines.append(f"Beacon decode failed (len={len(data)}B)")
+
+            elif pid == 0x05:  # System status
+                fmt = '>IBBIIIBiIIBBBB'
+                expected = struct.calcsize(fmt)
+                if len(data) != expected:
+                    lines.append(f"Decode warning: SystemStatus needs {expected}B, got {len(data)}B")
+                else:
+                    (
+                        obc_boot_count,
+                        usb_bus_status,
+                        eps_status,
+                        payload_boot_count,
+                        payload_timestamp,
+                        payload_uptime,
+                        payload_cpu_load,
+                        payload_cpu_temp_milli,
+                        payload_ram_mb,
+                        payload_disk_mb,
+                        payload_camera_status,
+                        payload_throttled,
+                        payload_file_count,
+                        payload_load_avg,
+                    ) = struct.unpack(fmt, data)
+
+                    usb_str = "OK" if usb_bus_status == 0x00 else "Busy"
+                    eps_str = "OK" if eps_status == 0x00 else "No Response"
+                    cam_str = {0: "Err", 1: "Ready", 2: "Busy"}.get(payload_camera_status, "Unknown")
+                    lines.append(f"OBC Boot: {obc_boot_count} | USB: {usb_str} ({usb_bus_status}) | EPS: {eps_str} ({eps_status})")
+                    lines.append(f"Payload Boot: {payload_boot_count} | Time: {payload_timestamp} | Uptime: {payload_uptime}s")
+                    lines.append(
+                        f"CPU: {payload_cpu_load}% ({payload_cpu_temp_milli/1000.0:.3f}C) | RAM: {payload_ram_mb}MB | Disk: {payload_disk_mb}MB"
+                    )
+                    lines.append(
+                        f"CAM: {cam_str} ({payload_camera_status}) | Throttled: {payload_throttled} | Files: {payload_file_count} | LoadAvg: {payload_load_avg}"
+                    )
+
+            elif pid == 0xAC:
+                lines.append(f"ACK payload length: {len(data)}B")
+
+            else:
+                if data:
+                    lines.append(f"Raw Data: {data.hex(' ').upper()}")
+
+        elif p_id == 0x01:  # VR responses
+            if pid == 0x00:  # Ping
+                lines.append(f"Ping ACK payload length: {len(data)}B")
+
+            elif pid == 0x01:  # Pi status
+                expected = struct.calcsize('>IIBbBBB3x')
+                if len(data) != expected:
+                    lines.append(f"Decode warning: PiStatus needs {expected}B, got {len(data)}B")
+                else:
+                    ts, up, cpu_l, cpu_t, ram, disk, cam = struct.unpack('>IIBbBBB3x', data)
+                    cam_str = {0: "Err", 1: "Ready", 2: "Busy"}.get(cam, "Unknown")
+                    lines.append(f"Time: {ts} | Uptime: {up}s")
+                    lines.append(f"CPU: {cpu_l}% ({cpu_t}C) | RAM: {ram}% | Disk: {disk}% | CAM: {cam_str}")
+
+            elif pid == 0x02:  # Capture response
+                if len(data) < 2:
+                    lines.append(f"Decode warning: Capture response needs >=2B, got {len(data)}B")
+                else:
+                    status, name_len = struct.unpack('>BB', data[:2])
+                    name_raw = data[2:2+name_len]
+                    try:
+                        name = name_raw.decode('utf-8')
+                    except Exception:
+                        name = name_raw.decode('utf-8', errors='replace')
+                    lines.append(f"Status: {status} | File: {name}")
+                    if len(name_raw) != name_len:
+                        lines.append(f"Decode warning: filename length mismatch (header {name_len}, actual {len(name_raw)})")
+
+            elif pid == 0x03:  # Copy to SD response
+                if len(data) < 1:
+                    lines.append("Decode warning: CopyToSD response missing status byte")
+                else:
+                    status = data[0]
+                    status_str = "OK" if status == 0 else "Error"
+                    lines.append(f"CopyToSD Status: {status_str} ({status})")
+
+            elif pid == 0x04:  # Check copy response
+                if len(data) < 1:
+                    lines.append("Decode warning: CheckCopy response missing status byte")
+                else:
+                    status = data[0]
+                    status_str = {0: "Idle", 1: "Copying", 2: "Error"}.get(status, f"Unknown({status})")
+                    lines.append(f"CheckCopy Status: {status_str}")
+
+            elif pid == 0x90:  # Shutdown ack
+                lines.append(f"Shutdown ACK payload length: {len(data)}B")
+
+            elif pid == 0xAC:
+                lines.append(f"ACK payload length: {len(data)}B")
+
+            else:
+                if data:
+                    lines.append(f"Raw Data: {data.hex(' ').upper()}")
+
+    return lines
 
 def main():
     _PORTS = {
@@ -113,25 +345,9 @@ def main():
                                 
                                 # Deep decode for specific packets
                                 try:
-                                    if p_id == 0x00: # OBC
-                                        if pid == 0x01 and cmd == 0x01: # List Files Response
-                                            num_files = data[0]
-                                            print(f"      Count: {num_files}")
-                                        elif pid == 0x02 and cmd == 0x01: # File Info Response
-                                            status, size, ts = struct.unpack('>BII', data)
-                                            print(f"      Status: {status} | Size: {size} B | Time: {ts}")
-                                        elif pid == 0x03: # File Data
-                                            status, offset, dl = struct.unpack('>BIH', data[:7])
-                                            print(f"      Status: {status} | Offset: {offset} | Len: {dl}")
-                                        elif pid == 0x04: # Beacon
-                                            beacon = decode_beacon_packet(data)
-                                            if beacon:
-                                                print(f"      Beacon: V_Batt={beacon.get('v_batt',0)}V, I_Batt={beacon.get('i_batt',0)}mA, Temp={beacon.get('temp_eps',0)}C")
-                                    elif p_id == 0x01: # VR
-                                        if pid == 0x01 and cmd == 0x01: # Pi Status
-                                            ts, up, cpu_l, cpu_t, ram, disk, cam = struct.unpack('>IIBbBBB3x', data)
-                                            cam_str = {0:"Err", 1:"Ready", 2:"Busy"}.get(cam, "Unknown")
-                                            print(f"      Status -> CPU: {cpu_l}% ({cpu_t}C) | RAM: {ram}% | CAM: {cam_str}")
+                                    decoded_lines = decode_layer3_data(cmd, p_id, pid, data)
+                                    for line in decoded_lines:
+                                        print(f"      {line}")
                                 except Exception as e:
                                     print(f"      \033[90m[Decoding failed: {e}]\033[0m")
                             else:
