@@ -79,6 +79,42 @@ def _parse_len_prefixed_filename(data: bytes):
     remainder = data[1+name_len:]
     return (name, remainder), None
 
+def _format_beacon_lines(decoded_data):
+    if not decoded_data:
+        return ["[Beacon decode failed]"]
+
+    lines = ["EPS SENSOR DATA:"]
+
+    for idx, vi in enumerate(decoded_data["eps"]["vi_sensors"]):
+        lines.append(
+            f"VI Sensor {idx:<1}   | V: {vi['voltage']} mV, I: {vi['current']} mA, Ch: {vi['channel']}, State: {vi['data_state']}"
+        )
+
+    for idx, out in enumerate(decoded_data["eps"]["output_sensors"]):
+        lines.append(
+            f"Out Sensor {idx:<1}  | V: {out['voltage']} mV, I: {out['current']} mA, Ch: {out['channel']}, State: {out['data_state']}"
+        )
+
+    for idx, out_state in enumerate(decoded_data["eps"]["output_states"]):
+        lines.append(
+            f"Out State {idx:<1}   | Status: {out_state['status']}, Ch: {out_state['channel']}, State: {out_state['data_state']}"
+        )
+
+    for idx, temp in enumerate(decoded_data["eps"]["battery_temps"]):
+        lines.append(
+            f"Batt Temp {idx:<1}   | Temp: {temp['temperature']:.2f} °C, Ch: {temp['channel']}, State: {temp['data_state']}"
+        )
+
+    lines.append("RTC DATETIME:")
+    rtc = decoded_data["rtc"]
+    lines.append(
+        f"20{rtc['year']:02d}-{rtc['month']:02d}-{rtc['day']:02d} {rtc['hour']:02d}:{rtc['min']:02d}:{rtc['sec']:02d} (WDay: {rtc['wday']})"
+    )
+
+    lines.append("TMP1075 SENSOR:")
+    lines.append(f"Raw Temp Value: {decoded_data['tmp1075']['raw_temp']}")
+    return lines
+
 def decode_layer3_data(cmd, p_id, pid, data: bytes):
     lines = []
 
@@ -187,13 +223,7 @@ def decode_layer3_data(cmd, p_id, pid, data: bytes):
                         lines.append(f"Trailing bytes: {data[7+len(chunk):].hex(' ').upper()}")
 
             elif pid == 0x04:  # Beacon
-                beacon = decode_beacon_packet(data)
-                if beacon:
-                    lines.append(
-                        f"Beacon: V_Batt={beacon.get('v_batt',0)}V, I_Batt={beacon.get('i_batt',0)}mA, Temp={beacon.get('temp_eps',0)}C"
-                    )
-                else:
-                    lines.append(f"Beacon decode failed (len={len(data)}B)")
+                lines.append("Beacon decoded below:")
 
             elif pid == 0x05:  # System status
                 fmt = '>IBBIIIBiIIBBBB'
@@ -348,6 +378,14 @@ def main():
                                     decoded_lines = decode_layer3_data(cmd, p_id, pid, data)
                                     for line in decoded_lines:
                                         print(f"      {line}")
+
+                                    if cmd == 0x01 and p_id == 0x00 and pid == 0x04:
+                                        beacon = decode_beacon_packet(data)
+                                        if beacon:
+                                            for beacon_line in _format_beacon_lines(beacon):
+                                                print(f"      {beacon_line}")
+                                        else:
+                                            print(f"      \033[90m[Beacon decode failed: len={len(data)}]\033[0m")
                                 except Exception as e:
                                     print(f"      \033[90m[Decoding failed: {e}]\033[0m")
                             else:
