@@ -19,7 +19,19 @@ typedef enum {
   PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,
   PID_GS_VR_REQUEST_SYSTEM_STATUS,
   PID_GS_VR_REQUEST_SHUTDOWN = 0x90,
+  PID_GS_VR_ACK = 0xAC,
+  PID_GS_VR_NAK = 0xAD,
 } commu_payload_vr_pid;
+
+typedef enum {
+  PID_VR_GS_RESPONSE_PING,
+  PID_VR_GS_RESPONSE_PI_STATUS,
+  PID_VR_GS_RESPONSE_CAPTURE,
+  PID_VR_GS_RESPONSE_COPY_IMAGE_TO_SD,
+  PID_VR_GS_RESPONSE_SYSTEM_STATUS,
+  PID_VR_GS_ACK = 0xAC,
+  PID_VR_GS_NAK = 0xAD,
+} payload_commu_vr_pid;
 
 typedef enum {
   PID_OBC_GS_RESPONSE_PING,
@@ -27,6 +39,8 @@ typedef enum {
   PID_OBC_GS_RESPONSE_FILE_INFO,
   PID_OBC_GS_RESPONSE_FILE_DATA,
   PID_OBC_GS_BEACON,
+  PID_OBC_GS_ACK = 0xAC,
+  PID_OBC_GS_NAK = 0xAD,
 } obc_downlink_pid;
 
 typedef enum {
@@ -36,6 +50,8 @@ typedef enum {
   PID_GS_OBC_REQUEST_FILE_DATA,
   PID_GS_OBC_04_UNUSED,
   PID_GS_OBC_REQUEST_SYSTEM_STATUS,
+  PID_GS_OBC_ACK = 0xAC,
+  PID_GS_OBC_NAK = 0xAD,
 } gs_uplink_pid;
 
 typedef enum{

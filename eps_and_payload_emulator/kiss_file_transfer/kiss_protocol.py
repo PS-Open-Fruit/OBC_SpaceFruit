@@ -1,5 +1,5 @@
 import zlib
-
+import struct
 
 class KISSProtocol:
     FEND = 0xC0
@@ -89,10 +89,34 @@ class KISSProtocol:
             i += 1
         return bytes(output)
     
+    
+    @classmethod
+    def encode_layer_kiss(cls, data : bytes,cmd : int = 0x00) -> bytes:
+        structured_payload = bytes([cls.FEND,cmd]) + cls.escape(data) + bytes(cls.FEND)
+        return structured_payload
+    
+    @classmethod
+    def decode_layer_kiss(cls, data: bytes) -> list[bytes,bytes]:
+        """
+        Decodes a KISS frame by removing FEND markers and unescaping the payload.
+        """
+        # 1. Strip leading/trailing FEND markers if they exist
+        data = data.strip(bytes([cls.FEND]))
+        
+        if not data:
+            return b""
+
+        # 2. Extract the command byte (first byte) and the escaped payload
+        # cmd = data[0]  # You can capture this if you need to validate the command type
+        escaped_payload = data[2:]
+
+        # 3. Unescape the data to get the original raw bytes
+        return [data[1],cls.unescape(escaped_payload)]
+    
     # -------------------------------------------------
     # Frame Builder
     # -------------------------------------------------
-    @classmethod
+    @classmethod # This one works as Level KISS and Transport Layer Already
     def wrap_frame(cls, payload_id: int, pid: int, data: bytes,
                    command: int = CMD_DATA) -> bytes:
         """
@@ -138,6 +162,9 @@ class KISSProtocol:
         # print(bytes([cls.PAYLOAD_IMAGE, pid, file_id]))
         # print(type(chunk_id.to_bytes(4, "big")))
         # print(type(content))
+
+        
+
         chunk_len = len(content)
         structured = (
             bytes([cls.PAYLOAD_IMAGE, pid, file_id]) +

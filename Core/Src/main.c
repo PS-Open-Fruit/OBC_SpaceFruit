@@ -37,6 +37,7 @@
 #include "protocol_utils.h"
 #include "commu_helper.h"
 #include "time.h"
+#include "payload_protocol.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -239,6 +240,8 @@ const osSemaphoreAttr_t sdTxSemaphoreAttr = {
 #define PAYLOAD_FLAG_POLL_STATUS      0x00000002U
 #define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000004U
 #define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000008U
+#define PAYLOAD_FLAG_PING             0x00000040U
+#define PAYLOAD_FLAG_RESPONSE_PING    0x00000080U
 #define PAYLOAD_FLAG_IMAGE_DATA       0x00000010U
 
 // usb_data_t usb_buff;
@@ -1223,7 +1226,7 @@ void mainTask(void *argument)
     uint32_t millis = (ticks * 1000U) / freq;
 
     if (millis - data_polling_timeNow > DATA_POLLING_INTERVAL){
-        printf("local state %ld\r\n",local_state);
+        printf("local state %ld, payload state %ld\r\n",local_state,osEventFlagsGet(payloadFlagHandle));
         sensors_data_ready = 0;
         HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
         osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
@@ -1436,6 +1439,8 @@ void mainTask(void *argument)
           if (commu_request_header.payload_id == COMMU_PAYLOAD_ID_VR){
             uint8_t commu_vr_request_payload[64];
             int16_t commu_vr_request_len = 0;
+            uint8_t commu_content[128];
+            int16_t commu_len = 0;
             switch (commu_request_header.pid)
             {
             case PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD:
@@ -1457,7 +1462,30 @@ void mainTask(void *argument)
               break;
             case PID_GS_VR_REQUEST_PING:
               printf("GS Requests PI Ping\r\n");
-              // commu_vr_request_len = 
+              if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
+                commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_PING,0,NULL,commu_vr_request_payload,64);
+                osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+                osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_PING);
+                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+                CDC_Transmit_FS(commu_content, commu_len);
+                uint32_t getFlagRet = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_PING,osFlagsWaitAll,1000);
+                if (getFlagRet == osErrorTimeout){
+                  printf("\033[0;31mVR Ping Timeout sent %d bytes\033[0m\r\n",commu_len);
+                  osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_PING);
+                  // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+                  commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
+                }
+                else{
+                  printf("\033[0;32mPayload Response Ping\033[0m\r\n");
+                  commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_PING,0,NULL,commu_vr_request_payload,64);
+                }
+              }
+              else{
+                commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
+              }
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+              osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+              HAL_UART_Transmit_IT(&COM_UART, commu_content, commu_len);
               break;
             case PID_GS_VR_REQUEST_SHUTDOWN:
               printf("GS Requests VR Shutdown (DANGEROUS)\r\n");
@@ -1717,9 +1745,10 @@ void usbTask(void *argument)
                                              (void *)&usb_data_rx,
                                              NULL, PAYLOAD_RX_TIMEOUT);
 
-          // printf("Queue Trigger\r\n");
+          // printf("Queue Trigger %d %d\r\n",status,payload_commu_state);
+
         if (status == osErrorTimeout){
-          if (payload_commu_state == PAYLOAD_STATE_RX){
+          if ((payload_commu_state == PAYLOAD_STATE_RX) || (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IMAGE_REQUEST)){
             printf("USB RX Timeout, Reset State...\r\n");
             osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER);
             osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
@@ -1792,6 +1821,14 @@ void usbTask(void *argument)
                 f_close(&fil);
                 continue;
                 // if (decoded_payload.content_len )
+            }
+            if (decoded_payload.pid == PID_VR_GS_RESPONSE_PING){
+                uint32_t flag = osEventFlagsGet(payloadFlagHandle);
+
+                if (flag & PAYLOAD_FLAG_PING){
+                  osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_PING);
+                  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_PING);
+                }
             }
             if (decoded_payload.pid == KISS_PID_ACK)
             {

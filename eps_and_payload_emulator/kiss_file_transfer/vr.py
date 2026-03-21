@@ -178,6 +178,7 @@ class ProgressBar:
 PAYLOAD_ID_VR               = 0x01
 
 VR_PID_GET_STATUS           = 0x00
+VR_PID_PING                 = 0x00
 VR_PID_GET_IMAGE_CAPTURE    = 0x01
 VR_PID_IMAGE_REQUEST        = 0x02
 VR_PID_IMAGE_DOWNLOAD       = 0x03
@@ -210,7 +211,7 @@ except FileNotFoundError:
     SERIAL_PORT = '/dev/ttys005'
 
 BAUD_RATE    = 115200
-FILE_TO_SAVE = 'testimg-1.jpg'
+FILE_TO_SAVE = 'source-img/testimg-1.jpg'
 
 ser: serial.Serial | None = None
 
@@ -225,7 +226,7 @@ _progress_bar: ProgressBar | None = None
 def _banner():
     print()
     print(C.BOLD + C.CYAN + "  ╔══════════════════════════════════════╗" + C.RESET)
-    print(C.BOLD + C.CYAN + "  ║     VR Image Transfer Tool  v1.0     ║" + C.RESET)
+    print(C.BOLD + C.CYAN + "  ║     VR Image Transfer Tool  v2.0     ║" + C.RESET)
     print(C.BOLD + C.CYAN + "  ╚══════════════════════════════════════╝" + C.RESET)
     print()
     Log.info(f"Port: {C.BOLD}{SERIAL_PORT}{C.RESET}  Baud: {C.BOLD}{BAUD_RATE}{C.RESET}  File: {C.BOLD}{FILE_TO_SAVE}{C.RESET}")
@@ -289,13 +290,16 @@ def print_transfer_summary(total_bytes: int, elapsed: float):
     rate_KBps = total_bytes / elapsed / 1_024
 
     print()
-    print(C.BOLD + C.GREEN + "  ┌─────────────────────────────────────────┐" + C.RESET)
-    print(C.BOLD + C.GREEN + "  │         FILE TRANSFER COMPLETE           │" + C.RESET)
-    print(C.BOLD + C.GREEN + "  ├─────────────────────────────────────────┤" + C.RESET)
-    print(f"  │  {C.CYAN}Total sent  {C.RESET}: {total_bytes:,} bytes ({total_bytes/1_024:.2f} KiB)")
-    print(f"  │  {C.CYAN}Elapsed     {C.RESET}: {elapsed:.3f} s")
-    print(f"  │  {C.CYAN}Data rate   {C.RESET}: {rate_kbps:.1f} kbps  ({rate_KBps:.2f} KiB/s)")
-    print(C.BOLD + C.GREEN + "  └─────────────────────────────────────────┘" + C.RESET)
+    print(C.BOLD + C.GREEN + "\t┌───────────────────────────────────────────────┐" + C.RESET)
+    print(C.BOLD + C.GREEN + "\t│            FILE TRANSFER COMPLETE             │" + C.RESET)
+    print(C.BOLD + C.GREEN + "\t├───────────────────────────────────────────────┤" + C.RESET)
+    line1 = f"{C.CYAN}Total sent  {C.RESET}: {total_bytes:,} bytes ({total_bytes/1_024:.2f} KiB)"
+    line2 = f"{C.CYAN}Elapsed     {C.RESET}: {elapsed:.3f} s"
+    line3 = f"{C.CYAN}Data rate   {C.RESET}: {rate_kbps:.1f} kbps  ({rate_KBps:.2f} KiB/s)"
+    print(f"\t│    {line1.ljust(52)}{C.GREEN}│{C.RESET}")
+    print(f"\t│    {line2.ljust(52)}{C.GREEN}│{C.RESET}")
+    print(f"\t│    {line3.ljust(52)}{C.GREEN}│{C.RESET}")
+    print(C.BOLD + C.GREEN + "\t└───────────────────────────────────────────────┘" + C.RESET)
     print()
 
 
@@ -360,7 +364,7 @@ def getCaptureRequest():
                 current_chunk_id = 0
                 current_file_id  = 0
 
-        # ── Receive & dispatch ─────────────────────────────────
+        # ── Receive & dispatch ────────────────────────────────
         buf   = recv_whole_frame()
         frame = KISS.unwrap_frame(buf)
 
@@ -375,9 +379,14 @@ def getCaptureRequest():
         pid = frame['pid']
 
         # ── STATUS POLL ───────────────────────────────────────
-        if pid == VR_PID_GET_STATUS:
-            mode_label = FILE_MODE_LABELS.get(file_mode, f"0x{file_mode:02X}")
-            Log.info(f"Status poll received  [mode={C.BOLD}{mode_label}{C.RESET}]")
+        # if pid == VR_PID_GET_STATUS:
+        #     mode_label = FILE_MODE_LABELS.get(file_mode, f"0x{file_mode:02X}")
+        #     Log.info(f"Status poll received  [mode={C.BOLD}{mode_label}{C.RESET}]")
+        if pid == VR_PID_PING:
+            Log.info(f"Ping Request")
+            content = KISS.wrap_frame(PAYLOAD_ID_VR,VR_PID_PING,b'',command=KISS.CMD_DATA)
+            send_data(content)
+            Log.info("Responded")
 
         # ── ACK ───────────────────────────────────────────────
         elif pid == PID_ACK:
