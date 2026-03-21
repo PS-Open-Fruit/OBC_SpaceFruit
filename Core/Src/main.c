@@ -1434,6 +1434,8 @@ void mainTask(void *argument)
         if (status_commu == COMMU_VALID_DATA){
           // printf("Valid commu data\r\n");
           if (commu_request_header.payload_id == COMMU_PAYLOAD_ID_VR){
+            uint8_t commu_vr_request_payload[64];
+            int16_t commu_vr_request_len = 0;
             switch (commu_request_header.pid)
             {
             case PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD:
@@ -1455,6 +1457,7 @@ void mainTask(void *argument)
               break;
             case PID_GS_VR_REQUEST_PING:
               printf("GS Requests PI Ping\r\n");
+              // commu_vr_request_len = 
               break;
             case PID_GS_VR_REQUEST_SHUTDOWN:
               printf("GS Requests VR Shutdown (DANGEROUS)\r\n");

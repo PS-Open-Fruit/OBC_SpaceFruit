@@ -1,0 +1,1 @@
+/dev/serial/by-id/usb-Openfruit_Aerospace_OBC_VCP_206830844543-if00
