@@ -295,9 +295,9 @@ def print_transfer_summary(total_bytes: int, elapsed: float):
     line1 = f"{C.CYAN}Total sent  {C.RESET}: {total_bytes:,} bytes ({total_bytes/1_024:.2f} KiB)"
     line2 = f"{C.CYAN}Elapsed     {C.RESET}: {elapsed:.3f} s"
     line3 = f"{C.CYAN}Data rate   {C.RESET}: {rate_kbps:.1f} kbps  ({rate_KBps:.2f} KiB/s)"
-    print(f"\t│    {line1.ljust(52)}{C.GREEN}│{C.RESET}")
-    print(f"\t│    {line2.ljust(52)}{C.GREEN}│{C.RESET}")
-    print(f"\t│    {line3.ljust(52)}{C.GREEN}│{C.RESET}")
+    print(f"\t│   {line1.ljust(53)}{C.GREEN}│{C.RESET}")
+    print(f"\t│   {line2.ljust(53)}{C.GREEN}│{C.RESET}")
+    print(f"\t│   {line3.ljust(53)}{C.GREEN}│{C.RESET}")
     print(C.BOLD + C.GREEN + "\t└───────────────────────────────────────────────┘" + C.RESET)
     print()
 
@@ -409,10 +409,6 @@ def getCaptureRequest():
             file_size = os.path.getsize(file_path)
             Log.cmd(f"IMAGE REQUEST received  [{file_path}  {file_size:,} B]")
 
-            reply = KISS.wrap_frame(PAYLOAD_ID_VR, PID_ACK, b'')
-            send_data(reply)
-            Log.ok("ACK sent for IMAGE REQUEST")
-
             if frame['data_len'] == 3:
                 _file_id   = frame['data'][0]
                 _chunk_id  = frame['data'][1:3]
@@ -427,6 +423,9 @@ def getCaptureRequest():
                     Log.xfer(f"Single-chunk request: chunk #{requested_chunk}  file_id={_file_id}")
                     current_chunk_id = requested_chunk
                     file_mode        = FILE_MODE_CHUNK
+                reply = KISS.wrap_frame(PAYLOAD_ID_VR, PID_ACK, b'')
+                send_data(reply)
+                Log.ok("ACK sent for IMAGE REQUEST")
             else:
                 Log.warn(f"IMAGE REQUEST had unexpected data_len={frame['data_len']} — ignoring")
 
