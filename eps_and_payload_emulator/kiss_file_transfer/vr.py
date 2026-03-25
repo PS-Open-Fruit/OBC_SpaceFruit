@@ -211,7 +211,7 @@ except FileNotFoundError:
     SERIAL_PORT = '/dev/ttys005'
 
 BAUD_RATE    = 115200
-FILE_TO_SAVE = 'source-img/testimg-3.jpg'
+FILE_TO_SAVE = 'source-img/testimg-1.jpg'
 
 ser: serial.Serial | None = None
 
