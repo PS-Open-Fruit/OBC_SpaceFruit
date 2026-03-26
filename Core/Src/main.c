@@ -1525,6 +1525,10 @@ void mainTask(void *argument)
               commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_CAPTURE,0,NULL,commu_vr_request_payload,64);
               commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
               CDC_Transmit_FS(commu_content, commu_len);
+              uint8_t tmp[2] = {0,0};
+              commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_CAPTURE,2,tmp,commu_vr_request_payload,128);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+              HAL_UART_Transmit_IT(&COM_UART,commu_content,commu_len);
               break;
             case PID_GS_VR_REQUEST_PI_STATUS:
               printf("GS Requests PI Status\r\n");
