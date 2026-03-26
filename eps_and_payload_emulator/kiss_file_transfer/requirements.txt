@@ -1,2 +1,11 @@
+execnet==2.1.2
+iniconfig==2.3.0
+packaging==26.0
+pluggy==1.6.0
+psutil==7.2.2
+Pygments==2.19.2
 pyserial==3.5
-
+pytest==9.0.2
+pytest-shutil==1.8.1
+six==1.17.0
+termcolor==3.3.0

@@ -17,7 +17,7 @@ typedef enum {
   PID_GS_VR_REQUEST_PI_STATUS,
   PID_GS_VR_REQUEST_CAPTURE,
   PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,
-  PID_GS_VR_REQUEST_SYSTEM_STATUS,
+  // PID_GS_VR_REQUEST_SYSTEM_STATUS,
   PID_GS_VR_REQUEST_SHUTDOWN = 0x90,
   PID_GS_VR_ACK = 0xAC,
   PID_GS_VR_NAK = 0xAD,
@@ -278,6 +278,28 @@ uint16_t commu_file_downlink_encode(commu_file_data file_data,uint8_t status, ui
   output_len += input_len;
   return output_len;
 }
+
+uint16_t commu_system_status_raw_downlink_encode(uint32_t obc_boot_count,uint8_t usb_status, uint8_t eps_status, uint8_t *raw_payload_status, uint16_t input_len,uint8_t *output_buffer){
+  uint16_t output_len = 0;
+  if (raw_payload_status == NULL || input_len == 0){
+    return 0;
+  }
+  output_buffer[output_len] = (obc_boot_count >> 24) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (obc_boot_count >> 16) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (obc_boot_count >> 8) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (obc_boot_count >> 0) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = usb_status;
+  output_len++;
+  output_buffer[output_len] = eps_status;
+  output_len++;
+  memcpy(&output_buffer[output_len],raw_payload_status,input_len);
+  return output_len + input_len;
+}
+
 
 void commu_init(){
   commuSemaphoreHandle = osSemaphoreNew(1,0,&commuSemaphoreAttr);

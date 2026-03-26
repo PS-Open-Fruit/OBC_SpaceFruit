@@ -11,13 +11,6 @@ class Transport_Layer_Data:
 
 class OSI_Payload_Protocol:
 
-    PID_GS_VR_REQUEST_PING = 0
-    PID_GS_VR_REQUEST_PI_STATUS = 1
-    PID_GS_VR_REQUEST_CAPTURE = 2
-    PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD = 3
-    PID_GS_VR_REQUEST_SYSTEM_STATUS = 4
-    PID_GS_VR_REQUEST_SHUTDOWN = 0x90, 
-
     @staticmethod
     def calculate_crc(data: bytes) -> int:
         """

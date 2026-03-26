@@ -19,10 +19,10 @@ class KISSProtocol:
 
     PAYLOAD_ID_VR               = 0x01
 
-    VR_PID_GET_STATUS           = 0x00
-    VR_PID_GET_IMAGE_CAPTURE    = 0x01
-    VR_PID_GET_IMAGE_REQUEST    = 0x02
-    VR_PID_GET_IMAGE_DOWNLOAD   = 0x03
+    VR_PID_GET_STATUS           = 0x01
+    VR_PID_GET_IMAGE_CAPTURE    = 0x02
+    VR_PID_GET_IMAGE_REQUEST    = 0x03
+    VR_PID_GET_IMAGE_DOWNLOAD   = 0x87
 
     PID_ACK                     = 0xAC
 

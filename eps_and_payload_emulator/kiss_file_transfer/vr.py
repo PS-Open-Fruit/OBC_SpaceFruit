@@ -1,3 +1,5 @@
+import math
+
 import serial
 import time
 import sys
@@ -5,7 +7,10 @@ import os
 import subprocess
 from kiss_protocol import KISSProtocol as KISS
 from config import CHUNK_SIZE
-
+import psutil
+import shutil
+import struct
+from uptime import uptime
 
 # ─────────────────────────────────────────────────────────────
 #  ANSI color / style helpers
@@ -179,9 +184,10 @@ PAYLOAD_ID_VR               = 0x01
 
 VR_PID_GET_STATUS           = 0x00
 VR_PID_PING                 = 0x00
-VR_PID_GET_IMAGE_CAPTURE    = 0x01
-VR_PID_IMAGE_REQUEST        = 0x02
-VR_PID_IMAGE_DOWNLOAD       = 0x03
+VR_PID_PI_STATUS            = 0x01
+VR_PID_GET_IMAGE_CAPTURE    = 0x02
+VR_PID_IMAGE_REQUEST        = 0x03
+VR_PID_IMAGE_DOWNLOAD       = 0x87
 VR_PID_IMAGE_DOWNLOAD_DONE  = 0x88
 VR_PID_SHUTDOWN             = 0x90  # 0x9X for dangerous command range
 
@@ -212,6 +218,8 @@ except FileNotFoundError:
 
 BAUD_RATE    = 115200
 FILE_TO_SAVE = 'source-img/testimg-1.jpg'
+IMG_FOLDER = 'source-img'
+FILES = [ f"{IMG_FOLDER}/testimg-{i}.jpg" for i in range(4) ]
 
 ser: serial.Serial | None = None
 
@@ -241,6 +249,7 @@ def connect_serial():
             Log.serial(f"Connecting to {C.BOLD}{SERIAL_PORT}{C.RESET} @ {BAUD_RATE} baud …")
             ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=10)
             Log.ok("Serial connection established.")
+
             return
         except (serial.SerialException, OSError) as e:
             Log.error(f"Connection failed: {e}  — retrying in 2 s …")
@@ -312,7 +321,7 @@ def getCaptureRequest():
     current_chunk_id = 0
     current_file_id  = 0
     total_file_size  = 0        # filled when we first open the file
-
+    FILE_TO_SAVE = ""
     while True:
 
         # ── Active sending states ──────────────────────────────
@@ -377,6 +386,8 @@ def getCaptureRequest():
 
         pid = frame['pid']
 
+        Log.info(f"Received PID : {pid}",)
+
         # ── STATUS POLL ───────────────────────────────────────
         # if pid == VR_PID_GET_STATUS:
         #     mode_label = FILE_MODE_LABELS.get(file_mode, f"0x{file_mode:02X}")
@@ -386,6 +397,53 @@ def getCaptureRequest():
             content = KISS.wrap_frame(PAYLOAD_ID_VR,VR_PID_PING,b'',command=KISS.CMD_DATA)
             send_data(content)
             Log.info("Responded")
+
+        elif pid == VR_PID_PI_STATUS:
+            Log.cmd("Request Status Command Received")
+            cpu_temp = open("/sys/class/thermal/thermal_zone0/temp", "r")
+            temp_raw = cpu_temp.read()
+            ram = psutil.virtual_memory()
+            # Convert bytes to Gigabytes (or you can use Megabytes)
+            total_ram_mb = ram.total
+            available_ram_mb = ram.available
+            used_ram_mb = ram.used
+            ram_percent = ram.percent
+            cpu_percent = psutil.cpu_percent(interval=None)
+
+            Log.info(f"CPU Usage : {cpu_percent}%")
+            Log.info("RAM Status :")
+            Log.info(f" - Total RAM : {total_ram_mb}")
+            Log.info(f" - Available RAM : {available_ram_mb}")
+            Log.info(f" - Used RAM : {used_ram_mb}")
+            Log.info(f" - Percentage Used (%): {ram_percent}")
+            Log.info(f" - CPU Temp  : {temp_raw}")
+                
+            total, used, free = shutil.disk_usage("/")
+
+            # Convert bytes to a human-readable format (GiB - Mebibytes are 2**30)
+            # You can also use 10**9 for GB (Gigabytes) if preferred
+            gib_total = total / (2**30)
+            gib_used = used / (2**30)
+            gib_free = free / (2**30)
+
+            Log.info("Storage Status :")
+            Log.info(f" - Total: {gib_total:.2f} GiB")
+            Log.info(f" - Used: {gib_used:.2f} GiB")
+            Log.info(f" - Free: {gib_free:.2f} GiB")
+            Log.info(f" - Percentage Used: {(used/total)*100:.2f}%")
+            Log.info(f"Uptime : {uptime()}s")
+
+            boot_count_file = open("/home/bipoe/boot_count.txt")
+            boot_count = boot_count_file.read()
+            Log.info(f"Boot Count : {boot_count}")
+
+            cam_status = 1
+            disk_percent = math.ceil(used/total)
+
+            status_data = struct.pack(">IIIBIBBB",int(boot_count),int(0),int(uptime()),int(cpu_percent),int(temp_raw),int(ram_percent),int(disk_percent),int(cam_status))
+            data_osi_encoded = KISS.wrap_frame(PAYLOAD_ID_VR,VR_PID_PI_STATUS,status_data,1)      
+            send_data(data_osi_encoded)
+            pass
 
         # ── ACK ───────────────────────────────────────────────
         elif pid == PID_ACK:
@@ -405,15 +463,16 @@ def getCaptureRequest():
 
         # ── IMAGE REQUEST ─────────────────────────────────────
         elif pid == VR_PID_IMAGE_REQUEST:
-            file_path = f"{current_dir}/{FILE_TO_SAVE}"
-            file_size = os.path.getsize(file_path)
-            Log.cmd(f"IMAGE REQUEST received  [{file_path}  {file_size:,} B]")
 
             if frame['data_len'] == 3:
                 _file_id   = frame['data'][0]
                 _chunk_id  = frame['data'][1:3]
                 current_file_id  = _file_id
                 requested_chunk  = int.from_bytes(_chunk_id, "big")
+                FILE_TO_SAVE = FILES[current_file_id]
+                file_path = f"{current_dir}/{FILE_TO_SAVE}"
+                file_size = os.path.getsize(file_path)
+                Log.cmd(f"IMAGE REQUEST received  [{file_path}  {file_size:,} B]")
 
                 if requested_chunk == 0xFFFF:
                     Log.xfer(f"Full-file transfer requested (file_id={_file_id})")

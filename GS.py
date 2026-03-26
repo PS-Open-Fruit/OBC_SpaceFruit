@@ -375,7 +375,8 @@ def main():
                                                 print("GS> ", end="", flush=True) # Reprint prompt after jumping
 
                                         elif pid == 0x05: # System Status (OBC + EPS + Payload)
-                                            expected_len = struct.calcsize('>IBBIIIBiIIBBBB')
+                                            # expected_len = struct.calcsize('>IBBIIIBiIIBBBB')
+                                            expected_len = struct.calcsize('>IBBIIIBiBBB')
                                             if len(data) != expected_len:
                                                 print(f"     \033[93m[GS] System Status length mismatch: got {len(data)}B, expected {expected_len}B\033[0m")
                                             else:
@@ -391,10 +392,11 @@ def main():
                                                     payload_ram_mb,
                                                     payload_disk_mb,
                                                     payload_camera_status,
-                                                    payload_throttled,
-                                                    payload_file_count,
-                                                    payload_load_avg,
-                                                ) = struct.unpack('>IBBIIIBiIIBBBB', data)
+                                                    # payload_throttled,
+                                                    # payload_file_count,
+                                                    # payload_load_avg,
+                                                ) = struct.unpack('>IBBIIIBiBBB', data)
+                                                # ) = struct.unpack('>IBBIIIBiIIBBBB', data)
 
                                                 usb_str = "OK" if usb_bus_status == 0x00 else "Busy"
                                                 eps_str = "OK" if eps_status == 0x00 else "No Response"
@@ -408,10 +410,10 @@ def main():
                                                     f"                       Payload Boot: {payload_boot_count} | Time: {payload_timestamp} | Up: {payload_uptime}s"
                                                 )
                                                 print(
-                                                    f"                       CPU: {payload_cpu_load}% ({payload_cpu_temp_c:.3f}C) | RAM: {payload_ram_mb}MB | Disk: {payload_disk_mb}MB"
+                                                    f"                       CPU: {payload_cpu_load}% ({payload_cpu_temp_c:.3f}C) | RAM: {payload_ram_mb}% | Disk: {payload_disk_mb}%"
                                                 )
                                                 print(
-                                                    f"                       CAM: {cam_str} ({payload_camera_status}) | Throttled: {payload_throttled} | Files: {payload_file_count} | LoadAvg: {payload_load_avg}"
+                                                    f"                       CAM: {cam_str} ({payload_camera_status})" # | Throttled: {payload_throttled} | Files: {payload_file_count} | LoadAvg: {payload_load_avg}"
                                                 )
                                             
                                             
