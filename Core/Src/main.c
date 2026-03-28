@@ -369,7 +369,7 @@ int main(void)
 
   /* creation of printQueue */
   printQueueHandle = osMessageQueueNew (256, sizeof(uint8_t), &printQueue_attributes);
-  
+
   /* USER CODE BEGIN RTOS_QUEUES */
   payloadStatueQueueHandle = osMessageQueueNew (10, sizeof(uint8_t) * 24, &payloadStatueQueue_attributes);
   /* add queues, ... */
@@ -1231,6 +1231,7 @@ void mainTask(void *argument)
   uint8_t downlink_seq_num = 0;
 
   commu_file_data downlink_file_data;
+  uint32_t payload_flag_store = 0;
 
   for(;;)
   {
@@ -1501,22 +1502,30 @@ void mainTask(void *argument)
             int16_t commu_vr_request_len = 0;
             uint8_t commu_content[128];
             int16_t commu_len = 0;
+            uint32_t osRet = osErrorValue; /* Initialize with error value */
             switch (commu_request_header.pid)
             {
             case PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD:
               printf("Download image command\r\n");
-              uint8_t ack_msg[32] = {0x00,0xAC};
-              uint16_t ack_len = 0;
-              uint8_t msg[32] = {0};
-              ack_len = KISS_Encode(ack_msg,2,msg);
               printf("ACK to COMMU\r\n");
-              HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
               osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
-              uint8_t file_req_data[] = {0x01, 0xFF, 0xFF}; /* File ID (1), Chunk ID (2)*/
+              uint8_t file_req_data[] = {0x00, 0xFF, 0xFF}; /* File ID (1), Chunk ID (2)*/
               commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,3,file_req_data,commu_vr_request_payload,64);
               commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
               CDC_Transmit_FS(commu_content, commu_len);
+              // osRet = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_IDLE,osFlagsWaitAll | osFlagsNoClear,30000); /* Wait for VR to respond to image request (or at least ping) */ 
+              osRet = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_TRANSFER,osFlagsWaitAll | osFlagsNoClear,1000); /* Wait for VR to respond to image request (or at least ping) */ 
+              uint8_t status = 0; /* Assume success for ACK */ 
+              printf("Wait for image transfer response, osRet = %ld\r\n", osRet);
+              if (osRet == osFlagsErrorTimeout)
+              {
+                status = 1; /* Set error status */
+              }
+              printf("ACK to GS with status %d\r\n", status);
+              commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_COPY_IMAGE_TO_SD,1,&status,commu_vr_request_payload,64);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+              HAL_UART_Transmit_IT(&COM_UART,commu_content,commu_len);
               break;
             case PID_GS_VR_REQUEST_CAPTURE:
               printf("GS Requests to Capture\r\n");
@@ -1609,8 +1618,8 @@ void mainTask(void *argument)
                 break;
               case PID_GS_OBC_REQUEST_LIST_FILE:
                 printf("GS Request List File\r\n");
-                uint32_t currentPayloadFlag1 = osEventFlagsGet(payloadFlagHandle);
-                if (currentPayloadFlag1 & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
+                uint32_t currentPayloadFlag = osEventFlagsGet(payloadFlagHandle);
+                if (currentPayloadFlag & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
                   printf("\033[0;31mNot now, payload file copying\033[0m\r\n");
                   break;
                 }
@@ -1741,8 +1750,8 @@ void mainTask(void *argument)
                 break;
               case PID_GS_OBC_REQUEST_FILE_DATA:
                 printf("GS Request File data\r\n");
-                uint32_t currentPayloadFlag = osEventFlagsGet(payloadFlagHandle);
-                if (currentPayloadFlag & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
+                uint32_t currentPayloadFlag1 = osEventFlagsGet(payloadFlagHandle);
+                if (currentPayloadFlag1 & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER)){
                   printf("\033[0;31mNot now, payload file copying\033[0m\r\n");
                   break;
                 }
@@ -1856,6 +1865,21 @@ void mainTask(void *argument)
         }
       }
       osMutexRelease(uartMutexHandle);
+    }
+    uint32_t currentImgFlag = osEventFlagsGet(payloadFlagHandle);
+    if (currentImgFlag != payload_flag_store){
+      if (payload_flag_store & PAYLOAD_FLAG_IMAGE_TRANSFER && currentImgFlag & PAYLOAD_FLAG_IDLE){
+        uint8_t status = 0; /* Assume success for ACK */ 
+        uint16_t commu_vr_request_len = 0;
+        uint8_t commu_vr_request_payload[64];
+        uint8_t commu_content[128];
+        uint16_t commu_len = 0;
+        printf("ACK to GS with status %d\r\n", status);
+        commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_COPY_IMAGE_TO_SD,1,&status,commu_vr_request_payload,64);
+        commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+        HAL_UART_Transmit_IT(&COM_UART,commu_content,commu_len);
+      }
+      payload_flag_store = currentImgFlag;
     }
   }
   /* USER CODE END 5 */
