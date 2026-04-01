@@ -112,3 +112,6 @@ py_test/.venv
 downlink_stress_tests/
 test_kills.csv
 test_telemetry.csv
+
+*.DS_Store
+.DS_Store
