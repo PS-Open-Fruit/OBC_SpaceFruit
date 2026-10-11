@@ -119,3 +119,7 @@ test_telemetry.csv
 downlink_stress_tests/*
 cmd_output/
 tests_for_ri2c/
+
+# Personal AI agent settings (shared rules live in AGENTS.md)
+.claude/settings.local.json
+CLAUDE.local.md
