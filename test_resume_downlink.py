@@ -140,7 +140,8 @@ def main():
             gs_proc.wait()
 
             # Random Offline Delay
-            delay = random.uniform(5, 15)
+            # delay = random.uniform(5, 15)
+            delay = random.uniform(25, 45)
             print(f"[TEST] OBC Offline for {delay:.1f} seconds...")
             time.sleep(delay)
             
