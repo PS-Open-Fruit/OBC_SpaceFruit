@@ -115,3 +115,7 @@ test_telemetry.csv
 
 *.DS_Store
 .DS_Store
+
+# Personal AI agent settings (shared rules live in AGENTS.md)
+.claude/settings.local.json
+CLAUDE.local.md

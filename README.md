@@ -43,6 +43,7 @@ All three links use KISS framing. The full system description is in [docs/archit
 | [Ground station and test tools](docs/ground-station-tools.md) | `GS.py` CLI, OBC emulator, sniffer, resume stress tests, running without hardware |
 | [VR payload and EPS simulator](docs/payload-and-eps.md) | Raspberry Pi payload software and setup, EPS simulator |
 | [Known limitations](docs/known-limitations.md) | Known issues and hard-coded values |
+| [AGENTS.md](AGENTS.md) | Rules for AI coding agents and contributors: commit style, build/verify commands, conventions |
 
 ## Repository structure
 
