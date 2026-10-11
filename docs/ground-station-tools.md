@@ -153,7 +153,7 @@ python test_gs_cli.py --gs_port COM4 --filename 0.jpg
 Checks that a download survives repeated connection drops:
 
 1. Starts `GS.py` and runs `download 0.jpg`.
-2. Kills `GS.py` every `--kill_interval` seconds and keeps it offline for a random 5–15 s.
+2. Kills `GS.py` every `--kill_interval` seconds and keeps it offline for a random 25–45 s.
 3. Restarts it, and `GS.py` resumes from the partial file.
 4. When the download finishes, compares the **MD5** of `downloads/0.jpg` with the local reference `sd_card/0.jpg`.
 

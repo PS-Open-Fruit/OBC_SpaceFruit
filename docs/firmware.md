@@ -25,6 +25,7 @@ Nearly all application logic is in [`Core/Src/main.c`](../Core/Src/main.c). The 
 | `SPI1` | 20 Mbit/s, DMA | microSD card (FatFs) | `SD_SPI` |
 | `SPI2` | 40 Mbit/s, DMA | MT25QL NOR flash (littlefs) | `NOR_SPI` |
 | `I2C4` | – | RV-3028-C7 RTC (`0x52`), TMP1075 temperature sensor (`0x48`) | – |
+| `RTC` (internal) | Calendar, clocked from LSI | Set from the RV-3028-C7 every second; supplies FatFs file timestamps | – |
 | `IWDG` | LSI / 128, reload 120 (≈ 480 ms) | Independent watchdog | – |
 | `CRC` | Hardware CRC-32 | Frame checksums | – |
 | `USART1`, `USART3` | 115200 baud | Set up but not used | – |
@@ -99,7 +100,7 @@ flowchart LR
 
 `MainTask` runs a loop with no delay. On each pass it checks timers and event flags:
 
-1. **Every 1 s:** log the OBC and payload states, read the RTC, and copy the latest sensor and EPS data out under `sensorsMutex`. If new EPS data has arrived, pack it for the beacon.
+1. **Every 1 s:** log the OBC and payload states, read the RV-3028-C7 RTC and copy its time into the STM32's internal RTC, and copy the latest sensor and EPS data out under `sensorsMutex`. If new EPS data has arrived, pack it for the beacon.
 2. **In `DOWNLINK` state:** read one chunk from the SD card and send it as a File Data frame. After 5 frames, or at end of file, switch back to `BEACON`.
 3. **No downlink traffic for 10 s:** reset to `BEACON` and clear the downlink counter.
 4. **In `BEACON` state, every 10 s:** send a beacon.
@@ -127,6 +128,8 @@ The `WAIT_ACK` bit still exists in the code but nothing sets it any more. An ear
 | :--- | :--- | :--- | :--- |
 | microSD card | `SPI1` + DMA | FatFs | Files served to the ground station (list, info, data). Images copied from the Pi are written to `0.jpg` in the root folder and replace the previous copy. |
 | MT25QL NOR flash | `SPI2` + DMA | littlefs v2.11.2 | A `boot_count` file. It is incremented on every boot and reported in System Status. |
+
+Files written to the SD card get their FAT date and time from the STM32's internal RTC, through `get_fattime()` in [`FATFS/App/fatfs.c`](../FATFS/App/fatfs.c). The main loop sets that RTC from the RV-3028-C7 every second.
 
 littlefs suits raw NOR flash because it survives power loss and spreads writes across the chip. If mounting fails (first boot, or a corrupted file system), the firmware formats the flash and mounts it again.
 
